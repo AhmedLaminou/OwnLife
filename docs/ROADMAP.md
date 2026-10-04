@@ -48,23 +48,34 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
   to add, never proposed twice; optionally added without asking.
 - A test that the migrations build exactly the models. 100 backend tests.
 
+**v0.2.3 (2026-10-04)** — on GitHub, and less to type:
+
+- **The code on GitHub** (personal data scrubbed: tests use invented examples).
+- **Backups off this disk**: `BACKUP_MIRROR_DIR` gets a copy within the hour.
+- **Time from the journal**: the lines with a time become one draft per day in
+  the inbox (39 blocks on 23 days the first time); private pages never go to a
+  cloud model, for money either.
+- **The timer forgives**: started or stopped "minutes ago", and "still on it?"
+  after 2 hours.
+- **A built-in window tracker**: the program and window in front, every 5 s while
+  the keyboard or mouse is used; ActivityWatch no longer needed. 121 backend tests.
+
 ## Next, in the order that matters most
 
-1. **Go live** — apply the seed, load the extension, run `scripts\autostart.ps1`,
-   import Chrome's history once ([GOING_LIVE.md](GOING_LIVE.md)), and turn on
-   YouTube's watch history so the next exports carry the phone's videos.
-2. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
+1. **Go live** — apply the seed, run `scripts\autostart.ps1`, set
+   `BACKUP_MIRROR_DIR`, save the 23 journal drafts in the inbox, and turn on
+   YouTube's watch history so the next exports carry the phone's videos
+   ([GOING_LIVE.md](GOING_LIVE.md)).
+2. **Browser tabs by address** — the window tracker knows a tab only by its
+   title; the OwnLife extension can report the active tab's site, so domain rules
+   classify browsing as they classify YouTube.
+3. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
    Gemini prompts, Chrome pages, searches. Searchable by the assistant
    (`search_activity`), shown under each day, private by default for cloud models.
    Waiting on a decision: which of those OwnLife should hold at all.
-3. **A built-in window tracker**, if Smart App Control blocks ActivityWatch: the
-   active app and window title, sampled by OwnLife itself (Windows API through
-   `ctypes`, nothing to install), classified by the same rules.
-4. **Backfill the 33 days** — Journal → *Extract to ledger* on each day, with a
-   cloud model, reviewing each draft. A "batch extract" queue would make it faster.
-5. **Weekly and monthly reviews** — the daily reviews, aggregated: trend of core
+4. **Weekly and monthly reviews** — the daily reviews, aggregated: trend of core
    hours, noise, sleep regularity, adherence, the relapse-hour chart.
-6. **Encryption at rest** — SQLCipher, or at least BitLocker on the drive: the
+5. **Encryption at rest** — SQLCipher, or at least BitLocker on the drive: the
    database holds the journal in clear.
 
 ## Later

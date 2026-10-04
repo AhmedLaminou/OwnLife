@@ -370,7 +370,7 @@ the venv's `pythonw.exe` (signed by the Python Software Foundation).
 
 ## Tests
 
-- Backend: `python -m pytest tests -q` — 74 tests; each uses a fresh temporary
+- Backend: `python -m pytest tests -q` — 121 tests; each uses a fresh temporary
   database, a throwaway account and its own folder of Markdown files shaped like
   the real journal (CRLF, trailing spaces, no final newline); AI off unless a
   scripted fake model is injected, ActivityWatch mocked, notifications sent to a
@@ -378,8 +378,12 @@ the venv's `pythonw.exe` (signed by the Python Software Foundation).
   sync (minimal writes, conflicts, stale editors, vanished days, notes, the live
   watcher), undo, the extension's heartbeats (out of order included), prayer
   times against a published timetable, the reminders' schedule, life events,
-  imports, projections, habits, goals, plans, money, export/backup, YouTube,
-  ActivityWatch, hybrid search, the agent loop, capture and its safety defaults.
+  imports, projections, habits, goals, plans, money, export/backup and its copy
+  off the disk, YouTube, ActivityWatch, the window tracker (a fake window and
+  clock, plus one call to the real Windows API), money and time read from the
+  journal (a fake model), the timer's pauses and "minutes ago", hybrid search,
+  the agent loop, capture and its safety defaults — and that the migrations
+  build exactly the models.
 - The extension's scripts were run against a throwaway server with a fake
   `chrome` API (and `content.js` in a YouTube-like page): heartbeats, the queue
   while OwnLife is down, delivery afterwards, a revoked key.

@@ -10,7 +10,7 @@ in weeks into a working system:
 | --- | --- |
 | **Today** | Core work vs. your daily target, noise vs. its budget, the day hour by hour, timer, habits, the next prayer, milestones |
 | **Life** | 90 years in weeks, chapters past and planned, dated moments, waking hours left, where the last 30 days lead by 60, "what if" |
-| **Ledger** | Every logged block, day timeline and range statistics, by kind — no minute counted twice when two sources saw it |
+| **Ledger** | Every logged block — timer (with pause), the built-in window tracker, the YouTube extension, blocks read from your journal — day timeline and range statistics, by kind; no minute counted twice when two sources saw it |
 | **Planner** | The plan next to what happened, adherence, day templates whose prayers follow the real prayer times |
 | **Journal** | The Virtual Memory, synced both ways with your `.md` files as you write; searchable by words *and* meaning; notes and essays |
 | **Assistant** | Chat with your record (LangGraph agent with 21 tools + RAG): it reads the ledger, YouTube, money, habits, prayer times and life events, logs and plans; capture a day in free text, undo what it did, a review of each day |
@@ -75,7 +75,7 @@ From `backend/`:
 | `.\.venv\Scripts\python.exe -m app.cli reindex` | rebuild the search index with progress |
 | `.\.venv\Scripts\python.exe -m app.cli backup` | backup now (also automatic daily, and before every database upgrade) |
 | `.\.venv\Scripts\python.exe -m app.cli reset-password` | forgotten password (local only) |
-| `.\.venv\Scripts\python.exe -m pytest tests -q` | 100 backend tests |
+| `.\.venv\Scripts\python.exe -m pytest tests -q` | 121 backend tests |
 
 From `frontend/`: `npm run dev`, `npm run build`, `npm test`, `npm run typecheck`.
 
