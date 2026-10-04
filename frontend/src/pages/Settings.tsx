@@ -28,6 +28,7 @@ import { CHART_KINDS, KIND_HINT, KIND_LABEL } from "../lib/kinds";
 import type {
   AiStatus,
   ApiToken,
+  BackupMirror,
   Category,
   GlossaryItem,
   MeasuredToday,
@@ -630,13 +631,16 @@ function IntegrationsTab() {
 function DataTab() {
   const toast = useToast();
   const backups = useQuery({ queryKey: ["backups"], queryFn: () => api.get<{ name: string; bytes: number; created: string }[]>("/api/system/backups") });
+  const mirror = useQuery({ queryKey: ["backup-mirror"], queryFn: () => api.get<BackupMirror>("/api/system/backup-mirror") });
   const backup = useMutation({
-    mutationFn: () => api.post<{ path: string }>("/api/system/backup"),
-    onSuccess: () => {
+    mutationFn: () => api.post<{ path: string; mirror: string | null; mirror_error: string | null }>("/api/system/backup"),
+    onSuccess: (r) => {
       backups.refetch();
-      toast("Backup written", "good");
+      mirror.refetch();
+      toast(r.mirror ? "Backup written, and copied off this disk" : r.mirror_error ? `Backup written; the copy failed: ${r.mirror_error}` : "Backup written", r.mirror_error ? "critical" : "good");
     },
   });
+  const m = mirror.data;
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
   const change = useMutation({
     mutationFn: () => api.post("/api/auth/change-password", pw),
@@ -663,7 +667,22 @@ function DataTab() {
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-[12px] text-ink-3">Copy that folder to a USB key or a cloud drive from time to time: this record is meant to last decades.</p>
+        <div className="mt-3 border-t border-line pt-3 text-[13px]">
+          {!m ? null : !m.dir ? (
+            <Status ok={false}>
+              Only on this disk. Add <code>BACKUP_MIRROR_DIR=E:\OwnLifeBackups</code> (a USB stick, a share or a synced folder) to{" "}
+              <code>backend\.env</code> and restart: each new backup is then copied there.
+            </Status>
+          ) : !m.reachable ? (
+            <Status ok={false}>Copies go to {m.dir} — not reachable now. Plug it in: the newest backup follows within the hour.</Status>
+          ) : (
+            <Status ok={!m.behind}>
+              Also copied to {m.dir}: {m.copies.length} there{m.copies[0] ? `, newest ${m.copies[0].created.replace("T", " ").slice(0, 16)}` : ""}
+              {m.behind ? " — the newest backup follows within the hour" : ""}.
+            </Status>
+          )}
+          <p className="mt-2 text-[12px] text-ink-3">The copy is the database as it is, journal included, not encrypted: a drive you keep yourself is the safest place.</p>
+        </div>
       </Card>
       <Card title="Password" action={<KeyRound size={18} className="text-ink-3" />}>
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); change.mutate(); }}>

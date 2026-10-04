@@ -27,6 +27,7 @@ def env(tmp_path, monkeypatch):
     # Never the real journal: a yearly journal inside this test's own folder.
     monkeypatch.setenv("JOURNAL_SYNC_PATH", str(tmp_path / "MyUniverse" / "{year}" / "{year}_TEST_FILE.md"))
     monkeypatch.setenv("YOUTUBE_OEMBED", "false")
+    monkeypatch.setenv("BACKUP_MIRROR_DIR", "")  # never a real stick or cloud folder from backend/.env
     get_settings.cache_clear()
     s = get_settings()
     assert str(s.journal_sync_path).startswith(str(tmp_path)) and str(s.import_root) == str(tmp_path)

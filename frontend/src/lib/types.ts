@@ -610,6 +610,14 @@ export interface Transaction {
   source: string;
 }
 
+/** The second copy of the backups, off this disk (BACKUP_MIRROR_DIR). */
+export interface BackupMirror {
+  dir: string | null;
+  reachable: boolean;
+  copies: { name: string; bytes: number; created: string }[];
+  behind: boolean;
+}
+
 /** An amount found in the journal, waiting for a yes or a no. */
 export interface MoneySuggestion {
   id: number;

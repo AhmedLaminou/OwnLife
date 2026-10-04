@@ -45,7 +45,7 @@ from app.routers import (
 from app.security import CSRF_HEADER
 from app.services import filesync, journal_money, reminders
 from app.services.activitywatch import ActivityWatchError
-from app.services.backup import backup_if_due, make_backup
+from app.services.backup import backup_if_due, make_backup, mirror_latest
 
 log = logging.getLogger("ownlife")
 
@@ -63,9 +63,12 @@ async def _periodic_backup(settings: Settings) -> None:
             path = await run_in_threadpool(backup_if_due, settings)
             if path:
                 log.info("Automatic backup: %s", path)
+            copy = await run_in_threadpool(mirror_latest, settings)
+            if copy:
+                log.info("Backup copied off this disk: %s", copy)
         except Exception:
             log.exception("Automatic backup failed")
-        await asyncio.sleep(6 * 3600)
+        await asyncio.sleep(3600)  # hourly: a stick plugged in gets its copy within the hour
 
 
 async def _periodic_reminders(settings: Settings) -> None:

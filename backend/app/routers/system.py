@@ -54,7 +54,7 @@ from app.serializers import (
     thread_out,
     tx_out,
 )
-from app.services.backup import list_backups, make_backup
+from app.services.backup import list_backups, make_backup, mirror_latest, mirror_status
 
 router = APIRouter(prefix="/api/system", tags=["system"])
 
@@ -66,11 +66,25 @@ def health() -> dict:
 
 @router.post("/backup")
 def backup(user: CurrentUser) -> dict:  # noqa: ARG001
+    settings = get_settings()
     try:
-        path = make_backup(get_settings(), "manual")
+        path = make_backup(settings, "manual")
     except RuntimeError as e:
         raise HTTPException(400, str(e)) from e
-    return {"path": str(path), "bytes": path.stat().st_size}
+    try:
+        copy = mirror_latest(settings)
+    except OSError as e:  # the second place refused the copy: the local backup stands
+        copy, error = None, str(e)
+    else:
+        error = None
+    return {"path": str(path), "bytes": path.stat().st_size, "mirror": str(copy) if copy else None,
+            "mirror_error": error}
+
+
+@router.get("/backup-mirror")
+def backup_mirror(user: CurrentUser) -> dict:  # noqa: ARG001
+    """Where the second copy of the backups goes, and what is there."""
+    return mirror_status(get_settings())
 
 
 @router.get("/backups")

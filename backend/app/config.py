@@ -88,7 +88,12 @@ class Settings(BaseSettings):
     # Resolve YouTube channel names through the public oEmbed endpoint (no key).
     youtube_oembed: bool = True
 
-    @field_validator("import_root", "journal_sync_path", mode="before")
+    # A second copy of the backups, off this disk: a USB stick (E:/OwnLifeBackups),
+    # a network share, a synced cloud folder. The copy is the database as it is,
+    # journal included and not encrypted: prefer a drive you keep yourself.
+    backup_mirror_dir: Path | None = None
+
+    @field_validator("import_root", "journal_sync_path", "backup_mirror_dir", mode="before")
     @classmethod
     def _empty_is_none(cls, v):
         # JOURNAL_SYNC_PATH= (empty) switches the sync off.

@@ -140,6 +140,19 @@ def run(online: bool = False) -> int:
         except SyncError as e:
             report(FAIL, str(e), "JOURNAL_SYNC_PATH must be inside IMPORT_ROOT")
 
+    # --- Backups: a copy that survives this disk
+    from app.services.backup import mirror_status
+
+    m = mirror_status(s)
+    if m["dir"] is None:
+        report(WARN, "Backups exist only on this disk",
+               "Set BACKUP_MIRROR_DIR in backend/.env: a USB stick, a share or a synced folder.")
+    elif not m["reachable"]:
+        report(WARN, f"Backup copy place not reachable: {m['dir']}", "Plug in the drive: the newest backup follows within the hour.")
+    else:
+        report(OK if not m["behind"] else WARN, f"Backups also copied to {m['dir']} ({len(m['copies'])} there)",
+               "The newest backup follows within the hour." if m["behind"] else "")
+
     # --- Notifications (the evening reminders)
     if notify.available() and Path(notify._powershell()).exists():
         report(OK, "Windows notifications: through PowerShell 5.1 (test it in Settings → Rituals)")

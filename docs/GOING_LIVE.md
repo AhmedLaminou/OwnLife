@@ -157,6 +157,12 @@ Isha at those times every day.
 ## 9. Backups
 
 Automatic once a day into `backend\data\backups` (14 kept), and one before every
-database upgrade. Copy that folder to a USB key or a cloud drive now and then:
-the laptop is the only copy otherwise. Consider turning on BitLocker: the
-database holds your journal in clear.
+database upgrade. That folder is on the same disk as everything else, so give
+the backups a second place: `BACKUP_MIRROR_DIR=E:\OwnLifeBackups` in
+`backend\.env` (a USB stick you plug in now and then, a network share, or a
+synced folder such as OneDrive). Within the hour of it being reachable, the
+newest backup is copied there; 8 copies are kept. Settings → Data shows where
+the copies are, and `doctor` warns while backups exist only on this disk. The
+copy is the database as it is, journal included, not encrypted: a drive you keep
+yourself is the safest place. Consider BitLocker too: the database holds your
+journal in clear.
