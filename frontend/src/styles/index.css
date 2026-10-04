@@ -1,0 +1,286 @@
+@import "tailwindcss";
+@import "@fontsource-variable/inter";
+
+/* Dark is the default (late nights, battery during blackouts). [data-theme] on
+   <html> is set from the toggle; with no stored choice the OS preference wins. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #060a11;
+  --bg-elev: #0a101b;
+  --panel: rgba(16, 24, 38, 0.72);
+  --panel-solid: #111927;
+  --panel-hover: rgba(34, 46, 66, 0.55);
+  --line: rgba(148, 163, 184, 0.13);
+  --line-strong: rgba(148, 163, 184, 0.26);
+  --ink: #e7eef8;
+  --ink-2: #a9b7ca;
+  --ink-3: #708199;
+  --accent: #22d3ee;
+  --accent-soft: rgba(34, 211, 238, 0.14);
+  --accent-ink: #032029;
+  --amber: #f5a524;
+  --amber-soft: rgba(245, 165, 36, 0.14);
+  --grid: #1c2636;
+  --axis: #2b3749;
+  --glow-a: rgba(34, 211, 238, 0.10);
+  --glow-b: rgba(245, 165, 36, 0.07);
+
+  /* Categorical slots, dark steps — validated on #111927 (dataviz validator, 2026-10-02):
+     worst adjacent CVD ΔE 8.4, normal-vision ΔE 19.3, all ≥ 3:1 contrast. Order matters. */
+  --k-core: #3987e5;
+  --k-growth: #d95926;
+  --k-work: #199e70;
+  --k-spirit: #c98500;
+  --k-social: #d55181;
+  --k-body: #008300;
+  --k-maintenance: #9085e9;
+  --k-noise: #e66767;
+  --k-uncategorized: #4a5568;
+
+  /* Sequential (one hue), low → high on the dark surface */
+  --seq-1: #104281;
+  --seq-2: #1c5cab;
+  --seq-3: #2a78d6;
+  --seq-4: #5598e7;
+  --seq-5: #86b6ef;
+
+  /* Status: fixed, never themed, always with an icon and a label */
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f4f7;
+  --bg-elev: #ffffff;
+  --panel: rgba(255, 255, 255, 0.8);
+  --panel-solid: #fcfcfb;
+  --panel-hover: rgba(226, 232, 240, 0.7);
+  --line: rgba(15, 23, 42, 0.1);
+  --line-strong: rgba(15, 23, 42, 0.2);
+  --ink: #0b0f17;
+  --ink-2: #4a5464;
+  --ink-3: #7c8595;
+  --accent: #0e7490;
+  --accent-soft: rgba(14, 116, 144, 0.1);
+  --accent-ink: #ffffff;
+  --amber: #b45309;
+  --amber-soft: rgba(180, 83, 9, 0.1);
+  --grid: #e7e6e1;
+  --axis: #c3c2b7;
+  --glow-a: rgba(14, 116, 144, 0.08);
+  --glow-b: rgba(180, 83, 9, 0.05);
+
+  /* Light steps — validated on #fcfcfb. Aqua, yellow and magenta sit below 3:1:
+     every chart ships a legend and a table view (the required relief). */
+  --k-core: #2a78d6;
+  --k-growth: #eb6834;
+  --k-work: #1baf7a;
+  --k-spirit: #eda100;
+  --k-social: #e87ba4;
+  --k-body: #008300;
+  --k-maintenance: #4a3aa7;
+  --k-noise: #e34948;
+  --k-uncategorized: #a0a7b4;
+
+  --seq-1: #cde2fb;
+  --seq-2: #9ec5f4;
+  --seq-3: #6da7ec;
+  --seq-4: #3987e5;
+  --seq-5: #1c5cab;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+  }
+}
+
+@theme {
+  --font-sans: "Inter Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --color-bg: var(--bg);
+  --color-elev: var(--bg-elev);
+  --color-panel: var(--panel);
+  --color-panel-solid: var(--panel-solid);
+  --color-panel-hover: var(--panel-hover);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-amber: var(--amber);
+  --color-amber-soft: var(--amber-soft);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --animate-pulse-soft: pulse-soft 2.4s ease-in-out infinite;
+  --animate-caret: caret 1s steps(2, start) infinite;
+}
+
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+@keyframes caret {
+  to { visibility: hidden; }
+}
+@keyframes drift {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-60px, -40px, 0); }
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+body {
+  min-height: 100dvh;
+  overflow-x: hidden;
+}
+
+/* The backdrop: two slow glows (cyan, amber) and a faint star field. */
+.app-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(900px 520px at 12% -8%, var(--glow-a), transparent 60%),
+    radial-gradient(800px 600px at 108% 12%, var(--glow-b), transparent 55%),
+    var(--bg);
+}
+.app-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: -80px;
+  opacity: 0.55;
+  background-image:
+    radial-gradient(1px 1px at 20px 30px, rgba(255, 255, 255, 0.35), transparent 60%),
+    radial-gradient(1px 1px at 140px 80px, rgba(255, 255, 255, 0.22), transparent 60%),
+    radial-gradient(1px 1px at 260px 160px, rgba(255, 255, 255, 0.3), transparent 60%),
+    radial-gradient(1px 1px at 90px 220px, rgba(255, 255, 255, 0.18), transparent 60%);
+  background-size: 320px 260px;
+  animation: drift 90s linear infinite alternate;
+}
+:root[data-theme="light"] .app-backdrop::after {
+  opacity: 0;
+}
+
+.glass {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
+}
+.glass-solid {
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+}
+/* For things content scrolls under (the sticky header): nearly opaque, so the
+   text below never shows through when backdrop blur is weak or unavailable. */
+.glass-strong {
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.scroll-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Private things stay blurred until asked for. */
+.private-blur {
+  filter: blur(6px);
+  transition: filter 0.2s ease;
+  user-select: none;
+}
+.private-blur:hover,
+.private-blur:focus-within,
+.private-blur[data-revealed="true"] {
+  filter: none;
+  user-select: auto;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-backdrop::after {
+    animation: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* Prose (journal, assistant answers) */
+.prose-ol {
+  line-height: 1.7;
+}
+.prose-ol p {
+  margin: 0.55em 0;
+}
+.prose-ol ul,
+.prose-ol ol {
+  margin: 0.4em 0 0.4em 1.25em;
+}
+.prose-ol ul {
+  list-style: disc;
+}
+.prose-ol ol {
+  list-style: decimal;
+}
+.prose-ol strong {
+  color: var(--ink);
+  font-weight: 650;
+}
+.prose-ol code {
+  background: var(--panel-hover);
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+.prose-ol h1,
+.prose-ol h2,
+.prose-ol h3 {
+  font-weight: 650;
+  margin: 0.9em 0 0.3em;
+}
+.prose-ol table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+}
+.prose-ol th,
+.prose-ol td {
+  border: 1px solid var(--line);
+  padding: 0.25em 0.6em;
+}
+.prose-ol a {
+  color: var(--accent);
+  text-decoration: underline;
+}

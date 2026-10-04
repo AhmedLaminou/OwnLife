@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>OwnLife — YouTube time</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="page">
+      <div class="brand"><img src="icons/icon-32.png" alt="" /> Own<span>Life</span> — YouTube time</div>
+      <p class="muted">
+        This extension measures the minutes a YouTube video actually plays in this browser and sends them to your own
+        OwnLife, on this computer. It sends nothing anywhere else, and does nothing on other sites.
+      </p>
+      <div class="card">
+        <ol>
+          <li>In OwnLife: <b>Settings → Integrations → YouTube extension → Create a key</b>.</li>
+          <li>Paste the key below and press <b>Save and test</b>.</li>
+        </ol>
+        <label for="token">Key</label>
+        <input id="token" type="password" placeholder="ol_…" autocomplete="off" />
+        <label for="server">OwnLife server</label>
+        <input id="server" placeholder="http://127.0.0.1:8000" />
+        <label for="app">Where you open OwnLife <span class="muted">(optional — e.g. http://localhost:5173 while developing)</span></label>
+        <input id="app" placeholder="same as the server" />
+        <div class="actions">
+          <button id="save" class="primary">Save and test</button>
+        </div>
+        <p id="result" class="muted"></p>
+      </div>
+      <p class="muted">
+        The server address must be one this extension may reach: <code>http://127.0.0.1:8000</code> or
+        <code>http://localhost:8000</code>. If OwnLife runs on another port, change <code>host_permissions</code> in
+        manifest.json and reload the extension.
+      </p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

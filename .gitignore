@@ -1,0 +1,35 @@
+# --- Personal data: never committed --------------------------------------
+# The database, its backups, uploads and the personal seed live here.
+backend/data/
+# Raw exports (Google Takeout…): personal, and gigabytes
+GoogleData/
+Takeout/
+takeout-*.zip
+# Secrets: API keys, device keys, the extension's signing key
+.env
+*.env
+*.key
+*.pem
+*.crx
+credentials*.txt
+
+# --- Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# --- Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+.DS_Store
