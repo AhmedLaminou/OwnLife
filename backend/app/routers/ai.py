@@ -26,8 +26,9 @@ from app.config import get_settings
 from app.db import SessionLocal, utcnow
 from app.deps import DB, CurrentProfile, CurrentUser
 from app.models import CaptureDraft, Category, ChatMessage, ChatThread, DayReview, Habit, Profile
-from app.serializers import draft_out, message_out, thread_out
-from app.services import filesync
+from app.serializers import draft_out, iso, message_out, thread_out
+from app.services import filesync, journal_time
+from app.services.activitywatch import get_state
 from app.services.privacy import redact
 from app.services.undo import UndoError, undo_action, undo_capture
 from app.services.timeutil import day_start_utc, local_today, tz_of
@@ -53,6 +54,14 @@ class ChatIn(BaseModel):
 
 class ThreadPatch(BaseModel):
     title: str = Field(min_length=1, max_length=200)
+
+
+class JournalTimePrefs(BaseModel):
+    scan: bool = True
+
+
+class ReadIn(BaseModel):
+    all: bool = False  # read every page again, not only the changed ones
 
 
 # ---------------------------------------------------------------- status
@@ -104,6 +113,37 @@ async def capture(body: CaptureIn, user: CurrentUser, profile: CurrentProfile, d
     return draft_out(row)
 
 
+@router.get("/journal-time")
+def journal_time_state(user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    """Reading time blocks from the journal: preferences and the reader's state."""
+    state = get_state(db, user.id, journal_time.PROVIDER)
+    waiting = journal_time.changed_entries(db, user.id, dict((state.cursor or {}).get("days") or {}))
+    db.commit()
+    return {
+        "prefs": journal_time.settings_with_defaults((profile.prefs or {}).get("journal_time")),
+        "scan": journal_time.status(user.id),
+        "last_scan": iso(state.last_synced_at),
+        "last_error": state.last_error,
+        "days_not_read": len(waiting),
+        "ai_off": effective_mode(get_settings(), profile) == "off",
+    }
+
+
+@router.post("/journal-time/scan")
+def journal_time_scan(body: ReadIn, user: CurrentUser, profile: CurrentProfile) -> dict:
+    if effective_mode(get_settings(), profile) == "off":
+        raise HTTPException(400, "AI is off (Settings → AI): reading time from the journal needs a model.")
+    journal_time.schedule(get_settings(), user.id, rescan_all=body.all)
+    return journal_time.status(user.id)
+
+
+@router.put("/journal-time/prefs")
+def journal_time_prefs(body: JournalTimePrefs, profile: CurrentProfile, db: DB) -> dict:
+    profile.prefs = {**(profile.prefs or {}), "journal_time": body.model_dump()}
+    db.commit()
+    return journal_time.settings_with_defaults(profile.prefs["journal_time"])
+
+
 @router.get("/drafts")
 def list_drafts(user: CurrentUser, db: DB, status: str = "pending", limit: int = Query(50, le=500)) -> list[dict]:
     rows = db.scalars(
@@ -132,7 +172,9 @@ def commit_draft(draft_id: int, body: CommitIn, user: CurrentUser, profile: Curr
     row = _own_draft(db, user.id, draft_id)
     if row.status != "pending":
         raise HTTPException(409, f"This draft is already {row.status}")
-    result = commit(db, user.id, profile, body.draft)
+    # Blocks read from the journal are your own account of the day: they rank as entries you typed.
+    source = "journal" if (row.draft or {}).get("origin") == "journal" else "ai"
+    result = commit(db, user.id, profile, body.draft, source=source)
     row.status = "committed"
     row.draft = {**(row.draft or {}), "committed": body.draft.model_dump(mode="json"), "result": result}
     db.commit()

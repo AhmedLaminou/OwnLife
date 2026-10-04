@@ -182,6 +182,22 @@ server reads pages that changed once they have been quiet for 10 minutes, at mos
 every 30 minutes (one request for up to ~6,000 characters of clauses); "Add
 without asking" turns suggestions into transactions at once.
 
+## Time from the journal (`services/journal_time.py`)
+
+The same idea for time: only the lines of a page that hold a time (`13:30`, `9h`,
+`2 hours`, `45 mn`) go to the model — a very long line keeps just its clauses with
+a time, each with the clause before it ("then" needs its antecedent) — and a page
+is read again only when *those lines* change. The model returns blocks (what,
+start, end, category, people present, approximate or not) and the people met,
+numbered by the line they come from; each day becomes one draft in the Capture
+inbox, built with the same `normalize()` as a capture. A block that an entry of
+the ledger already covers (start and end within 10 minutes) arrives unticked
+with a note, so reading a page again never duplicates what was saved. Saved
+blocks get the source `journal`: your own account of the day, ranked with the
+entries you type. Private pages are never sent to a cloud model. First run,
+2026-10-04, free model: 35 pages in 2.5 minutes, 39 blocks on 23 days; 38 of
+them carry exactly the times written.
+
 ## Undo (`services/undo.py`)
 
 Every assistant action records what reverses it: the id it created, the statuses

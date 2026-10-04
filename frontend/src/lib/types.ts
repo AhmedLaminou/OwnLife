@@ -745,6 +745,20 @@ export interface CaptureDraftBody {
   people: { include: boolean; name: string; relation: string | null }[];
   warnings: string[];
   journal_text?: string | null;
+  /** Set on drafts the journal reader proposed: the text is already in the journal. */
+  origin?: "journal";
+  journal_entry_id?: number;
+  day_number?: number | null;
+}
+
+/** Reading time blocks from the journal (Assistant → Inbox). */
+export interface JournalTime {
+  prefs: { scan: boolean };
+  scan: { state: "idle" | "running" | "error"; error?: string | null; days?: number; lines?: number; blocks?: number; drafts?: number; finished_at?: string };
+  last_scan: string | null;
+  last_error: string | null;
+  days_not_read: number;
+  ai_off: boolean;
 }
 
 export interface CaptureDraft {

@@ -43,7 +43,7 @@ from app.routers import (
     system,
 )
 from app.security import CSRF_HEADER
-from app.services import filesync, journal_money, reminders
+from app.services import filesync, journal_money, journal_time, reminders
 from app.services.activitywatch import ActivityWatchError
 from app.services.backup import backup_if_due, make_backup, mirror_latest
 
@@ -81,13 +81,15 @@ async def _periodic_reminders(settings: Settings) -> None:
         await asyncio.sleep(60)
 
 
-async def _periodic_journal_money(settings: Settings) -> None:
+async def _periodic_journal_reading(settings: Settings) -> None:
+    """Money and time blocks read from the journal pages that changed."""
     await asyncio.sleep(120)
     while True:
-        try:
-            await run_in_threadpool(journal_money.tick, settings)
-        except Exception:
-            log.exception("Reading money from the journal failed")
+        for name, reader in (("money", journal_money), ("time", journal_time)):
+            try:
+                await run_in_threadpool(reader.tick, settings)
+            except Exception:
+                log.exception("Reading %s from the journal failed", name)
         await asyncio.sleep(300)
 
 
@@ -135,7 +137,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if settings.activitywatch_autosync_minutes > 0:
                 tasks.append(asyncio.create_task(_periodic_activitywatch(settings)))
             tasks.append(asyncio.create_task(_periodic_reminders(settings)))
-            tasks.append(asyncio.create_task(_periodic_journal_money(settings)))
+            tasks.append(asyncio.create_task(_periodic_journal_reading(settings)))
             if settings.file_sync and filesync.config(settings) is not None:
                 watcher = filesync.Watcher(settings)
                 filesync.set_watcher(watcher)

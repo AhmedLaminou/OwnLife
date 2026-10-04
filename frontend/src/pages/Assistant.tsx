@@ -7,12 +7,12 @@ import ReactMarkdown from "react-markdown";
 import { Link, useSearchParams } from "react-router";
 import remarkGfm from "remark-gfm";
 import { CaptureReview, useInvalidateLedger } from "../components/domain";
-import { Badge, Button, Card, Empty, ErrorNote, IconButton, Input, PageHeader, Spinner, Tabs, Textarea, useToast } from "../components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, IconButton, Input, PageHeader, Spinner, Tabs, Textarea, Toggle, useToast } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
-import { addDays, longDate, shortDate } from "../lib/format";
-import { useToday } from "../lib/hooks";
+import { addDays, clock, longDate, shortDate } from "../lib/format";
+import { useTimeZone, useToday } from "../lib/hooks";
 import { postStream } from "../lib/sse";
-import type { AiStatus, CaptureDraft, ChatAction, ChatMessage, ChatThread, DayReview, ReviewFacts, SearchHit } from "../lib/types";
+import type { AiStatus, CaptureDraft, ChatAction, ChatMessage, ChatThread, DayReview, JournalTime, ReviewFacts, SearchHit } from "../lib/types";
 
 const SUGGESTIONS = [
   "How did I spend the last 7 days, compared with my targets?",
@@ -352,6 +352,61 @@ function Chat({ threadId, setThreadId, status }: { threadId: number | null; setT
   );
 }
 
+/** The journal reader: lines with a time become drafts here, one per day. */
+function JournalTimeBar() {
+  const qc = useQueryClient();
+  const tz = useTimeZone();
+  const state = useQuery({
+    queryKey: ["journal-time"],
+    queryFn: () => api.get<JournalTime>("/api/ai/journal-time"),
+    refetchInterval: (q) => (q.state.data?.scan.state === "running" ? 2500 : 60_000),
+  });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["journal-time"] });
+    qc.invalidateQueries({ queryKey: ["drafts"] });
+  };
+  const read = useMutation({ mutationFn: () => api.post("/api/ai/journal-time/scan", { all: false }), onSuccess: refresh });
+  const prefs = useMutation({ mutationFn: (scan: boolean) => api.put("/api/ai/journal-time/prefs", { scan }), onSuccess: refresh });
+  const d = state.data;
+  const running = d?.scan.state === "running";
+  const ran = useRef(false);
+  useEffect(() => {
+    if (running) ran.current = true;
+    else if (ran.current) {
+      ran.current = false;
+      qc.invalidateQueries({ queryKey: ["drafts"] });
+    }
+  }, [running, qc]);
+  if (!d) return null;
+  const error = d.scan.state === "error" ? d.scan.error : d.last_error;
+  const status = running
+    ? "Reading the lines of your journal that hold a time…"
+    : d.ai_off
+      ? "AI is off (Settings → AI): the journal cannot be read for time blocks."
+      : error
+        ? `The last reading failed: ${error}`
+        : d.last_scan
+          ? `Journal read at ${clock(d.last_scan, tz)}. ${d.days_not_read ? `${d.days_not_read} page(s) changed since: read after 10 quiet minutes.` : "Up to date."}`
+          : "Your journal has not been read for time blocks yet: it starts by itself within minutes, or now.";
+  return (
+    <Card solid>
+      <div className="flex flex-wrap items-center gap-3">
+        <ScrollText size={18} className="shrink-0 text-ink-3" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-ink">From your journal</p>
+          <p className={clsx("text-[13px]", error && !running ? "text-warning" : "text-ink-3")}>{status}</p>
+          <p className="text-[12px] text-ink-3">Only the lines that hold a time are read; each day's blocks wait here until you save them.</p>
+        </div>
+        <Toggle checked={d.prefs.scan} onChange={(v) => prefs.mutate(v)} label="By themselves" />
+        <Button size="sm" variant="secondary" onClick={() => read.mutate()} loading={running || read.isPending} disabled={d.ai_off}>
+          Read now
+        </Button>
+      </div>
+      <ErrorNote error={read.error ?? prefs.error} />
+    </Card>
+  );
+}
+
 function InboxTab() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -375,22 +430,32 @@ function InboxTab() {
   if (drafts.isLoading) return <Spinner />;
   return (
     <div className="space-y-5">
+      <JournalTimeBar />
       {drafts.data?.length ? (
         <div className="grid gap-5 lg:grid-cols-[280px_1fr]">
           <ul className="space-y-1.5">
             {drafts.data.map((d) => (
               <li key={d.id}>
                 <button onClick={() => setOpen(d.id)} className={clsx("w-full rounded-xl border border-line px-3 py-2 text-left hover:bg-panel-hover", current?.id === d.id && "bg-panel-hover")}>
-                  <p className="text-[13px] font-medium">{shortDate(d.date)} · {d.draft.time_entries?.length ?? 0} entries</p>
+                  <p className="text-[13px] font-medium">
+                    {d.draft.origin === "journal" && (
+                      <span className="mr-1.5 text-accent">{d.draft.day_number ? `Journal · Day ${d.draft.day_number}` : "Journal"}</span>
+                    )}
+                    {shortDate(d.date)} · {d.draft.time_entries?.length ?? 0} entries
+                  </p>
                   <p className="line-clamp-2 text-[12px] text-ink-3">{d.input_text}</p>
                 </button>
               </li>
             ))}
           </ul>
-          {current && <Card solid><CaptureReview draft={current} onDone={() => setOpen(null)} /></Card>}
+          {current && (
+            <Card solid>
+              <CaptureReview draft={current} onDone={() => setOpen(null)} allowJournal={current.draft.origin !== "journal"} />
+            </Card>
+          )}
         </div>
       ) : (
-        <Empty icon={<Inbox size={22} />} title="Nothing waiting">Drafts from Capture wait here until you review them.</Empty>
+        <Empty icon={<Inbox size={22} />} title="Nothing waiting">Drafts from Capture and from your journal wait here until you review them.</Empty>
       )}
       {saved.data && saved.data.length > 0 && (
         <Card title="Saved recently" subtitle="A saved capture can be undone: its records are removed and the draft comes back here">
