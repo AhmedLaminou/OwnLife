@@ -50,8 +50,8 @@ type Tab = "profile" | "rituals" | "privacy" | "ai" | "categories" | "integratio
 
 function Status({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   return (
-    <p className="flex items-center gap-2 text-sm">
-      {ok ? <CheckCircle2 size={16} className="text-good" /> : <CircleAlert size={16} className="text-warning" />}
+    <p className="flex items-start gap-2 text-sm">
+      {ok ? <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-good" /> : <CircleAlert size={16} className="mt-0.5 shrink-0 text-warning" />}
       <span className={ok ? "text-ink-2" : "text-ink"}>{children}</span>
     </p>
   );

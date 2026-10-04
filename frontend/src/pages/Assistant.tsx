@@ -9,7 +9,7 @@ import remarkGfm from "remark-gfm";
 import { CaptureReview, useInvalidateLedger } from "../components/domain";
 import { Badge, Button, Card, Empty, ErrorNote, IconButton, Input, PageHeader, Spinner, Tabs, Textarea, Toggle, useToast } from "../components/ui";
 import { api, errorMessage } from "../lib/api";
-import { addDays, clock, longDate, shortDate } from "../lib/format";
+import { addDays, clock, longDate, pluralize, shortDate } from "../lib/format";
 import { useTimeZone, useToday } from "../lib/hooks";
 import { postStream } from "../lib/sse";
 import type { AiStatus, CaptureDraft, ChatAction, ChatMessage, ChatThread, DayReview, JournalTime, ReviewFacts, SearchHit } from "../lib/types";
@@ -441,7 +441,7 @@ function InboxTab() {
                     {d.draft.origin === "journal" && (
                       <span className="mr-1.5 text-accent">{d.draft.day_number ? `Journal · Day ${d.draft.day_number}` : "Journal"}</span>
                     )}
-                    {shortDate(d.date)} · {d.draft.time_entries?.length ?? 0} entries
+                    {shortDate(d.date)} · {pluralize(d.draft.time_entries?.length ?? 0, "entry", "entries")}
                   </p>
                   <p className="line-clamp-2 text-[12px] text-ink-3">{d.input_text}</p>
                 </button>

@@ -320,7 +320,6 @@ export function TimerCard() {
             <div className="flex flex-wrap items-center gap-2">
               {running.category && <Badge>{running.category.name}</Badge>}
               <div className="flex-1" />
-              <AgoSelect value={stoppedAgo} onChange={setStoppedAgo} now="now" label="When you stopped" />
               <Button variant="secondary" icon={<Pause size={14} />} onClick={() => pause.mutate()} loading={pause.isPending}>
                 Pause
               </Button>
@@ -328,6 +327,10 @@ export function TimerCard() {
                 Stop
               </Button>
             </div>
+            <label className="flex items-center justify-end gap-2 text-[12px] text-ink-3">
+              Forgot to press? It happened
+              <AgoSelect value={stoppedAgo} onChange={setStoppedAgo} now="now" label="When you paused or stopped" />
+            </label>
           </motion.div>
         ) : (
           <motion.form
