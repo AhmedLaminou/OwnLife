@@ -37,6 +37,7 @@ class ReminderPrefs(BaseModel):
     bedtime_text: str = Field("Bedtime. Screen off, phone in another room.", max_length=200)
     morning: bool = True
     auto_review: bool = True
+    timer_nudge_minutes: int = Field(120, ge=0, le=720)
 
 
 def _section(profile, name: str) -> dict:

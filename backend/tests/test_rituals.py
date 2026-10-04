@@ -116,6 +116,36 @@ def test_reminders_can_be_switched_off(client):
     assert client.get("/api/prefs").json()["reminders"]["enabled"] is False
 
 
+def test_a_long_running_timer_asks_if_you_are_still_on_it(client, categories):
+    from app.config import get_settings
+    from app.db import SessionLocal
+    from app.models import TimeEntry
+    from app.services import reminders
+
+    client.put("/api/prefs/reminders", json={"auto_review": False})
+    d = date(2026, 10, 3)
+    uid = client.get("/api/auth/me").json()["user"]["id"]
+    with SessionLocal() as db:
+        db.add(TimeEntry(user_id=uid, title="Linear algebra", category_id=categories["Mathematics"]["id"],
+                         started_at=_local(d, "14:00"), ended_at=None, source="timer"))
+        db.commit()
+    titles: list[str] = []
+
+    def fake(title, body, url=None, button=None):
+        titles.append(title)
+        return True, "fake"
+
+    s = get_settings()
+    assert reminders.tick(s, send=fake, now=_local(d, "15:30")) == []
+    assert reminders.tick(s, send=fake, now=_local(d, "16:01")) == ["timer"]  # 2 hours
+    assert titles == ["Still on “Linear algebra”?"]
+    assert reminders.tick(s, send=fake, now=_local(d, "17:00")) == []  # once per step
+    assert reminders.tick(s, send=fake, now=_local(d, "18:05")) == ["timer"]  # 4 hours
+    client.put("/api/prefs/reminders", json={"auto_review": False, "timer_nudge_minutes": 0})
+    assert reminders.tick(s, send=fake, now=_local(d, "20:10")) == []  # switched off
+    assert len(titles) == 2
+
+
 # ---------------------------------------------------------------- life events
 def test_life_events_crud_and_overview(client):
     e = client.post("/api/life/events", json={"date": "2022-09-15", "precision": "month", "area": "move",

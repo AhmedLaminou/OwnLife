@@ -344,6 +344,18 @@ function RemindersCard({ prefs }: { prefs: Prefs }) {
           )}
           <Toggle checked={f.morning} onChange={(v) => setF({ ...f, morning: v })} label="Morning summary at wake time (yesterday, today's prayers)" />
           <Toggle checked={f.auto_review} onChange={(v) => setF({ ...f, auto_review: v })} label="Write yesterday's review each morning (one model request when AI is on)" />
+          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <span className="text-ink-2">“Still on it?” when a timer runs for</span>
+            <Select value={f.timer_nudge_minutes} onChange={(e) => setF({ ...f, timer_nudge_minutes: Number(e.target.value) })} className="w-auto" aria-label="Long timer reminder">
+              <option value={0}>never</option>
+              <option value={60}>1 hour</option>
+              <option value={90}>1 h 30</option>
+              <option value={120}>2 hours</option>
+              <option value={180}>3 hours</option>
+              <option value={240}>4 hours</option>
+            </Select>
+            <span className="text-ink-3">(then twice, three times as long)</span>
+          </div>
         </div>
         <p className="text-[12px] leading-relaxed text-ink-3">
           Notifications come from this computer while OwnLife runs; a reminder missed by more than 45 minutes (laptop off) is skipped.

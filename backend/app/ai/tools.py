@@ -267,27 +267,30 @@ def build_tools(ctx: ToolContext) -> list[BaseTool]:
             return f"Logged #{entry.id}: {title} {start}–{end} ({_h((e - s).total_seconds())}) in {cat.name}{how}."
 
     @tool
-    def start_timer(title: str, category: str) -> str:
-        """Start a live timer now (stops any running one). `category` is a category name."""
+    def start_timer(title: str, category: str, minutes_ago: int = 0) -> str:
+        """Start a live timer (stops any running one). `category` is a category name.
+        minutes_ago when the person started earlier ("I began reading 20 minutes ago")."""
         with SessionLocal() as db:
             cat, _ = resolve_category(db, uid, category, title)
             if cat is None:
                 cats = db.scalars(select(Category).where(Category.user_id == uid, Category.archived.is_(False))).all()
                 return f"Unknown category {category!r}. Use one of: " + ", ".join(c.name for c in cats)
             previous = records.running_timer(db, uid)
-            entry = records.start_timer(db, uid, title, cat.id, utcnow())
+            entry = records.start_timer(db, uid, title, cat.id, utcnow() - timedelta(minutes=max(0, min(720, minutes_ago))))
             db.commit()
             ctx.actions.append({"type": "timer_started", "id": entry.id, "label": title,
                                 "stopped_id": previous.id if previous else None})
             return f"Timer started: {title} [{cat.name}]."
 
     @tool
-    def stop_timer(pause: bool = False) -> str:
+    def stop_timer(pause: bool = False, minutes_ago: int = 0) -> str:
         """Stop the running timer. pause=true when the person takes a break or
-        switches for a while and will come back to it (resume_timer)."""
+        switches for a while and will come back to it (resume_timer). minutes_ago
+        when they stopped earlier ("I stopped 15 minutes ago")."""
         with SessionLocal() as db:
             now = utcnow()
-            entry = records.pause_timer(db, uid, now) if pause else records.stop_timer(db, uid, now)
+            at = now - timedelta(minutes=max(0, min(720, minutes_ago)))
+            entry = records.pause_timer(db, uid, at) if pause else records.stop_timer(db, uid, at)
             db.commit()
             if entry is None:
                 return "No timer was running."

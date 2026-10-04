@@ -60,6 +60,7 @@ class EntryPatch(BaseModel):
 class TimerIn(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     category_id: int | None = None
+    minutes_ago: int = Field(0, ge=0, le=720)  # "I started 20 minutes ago"
 
 
 class QuickIn(BaseModel):
@@ -194,16 +195,21 @@ def get_timer(user: CurrentUser, db: DB) -> dict | None:
 
 @router.post("/timer/start")
 def timer_start(body: TimerIn, user: CurrentUser, db: DB) -> dict:
+    """Starts now, or `minutes_ago` back; a timer running meanwhile stops at that moment."""
     _check_refs(db, user.id, body.category_id, None)
-    e = records.start_timer(db, user.id, body.title, body.category_id, utcnow())
+    now = utcnow()
+    e = records.start_timer(db, user.id, body.title, body.category_id, now - timedelta(minutes=body.minutes_ago))
     db.commit()
-    return entry_out(e, utcnow())
+    return entry_out(e, now)
+
+
+AGO = Query(0, ge=0, le=720, description="It happened this many minutes ago")
 
 
 @router.post("/timer/stop")
-def timer_stop(user: CurrentUser, db: DB) -> dict | None:
+def timer_stop(user: CurrentUser, db: DB, minutes_ago: int = AGO) -> dict | None:
     now = utcnow()
-    e = records.stop_timer(db, user.id, now)
+    e = records.stop_timer(db, user.id, now - timedelta(minutes=minutes_ago))
     db.commit()
     return _with_session(db, user.id, e, now) if e else None
 
@@ -224,9 +230,9 @@ def timer_state(user: CurrentUser, db: DB) -> dict:
 
 
 @router.post("/timer/pause")
-def timer_pause(user: CurrentUser, db: DB) -> dict:
+def timer_pause(user: CurrentUser, db: DB, minutes_ago: int = AGO) -> dict:
     now = utcnow()
-    e = records.pause_timer(db, user.id, now)
+    e = records.pause_timer(db, user.id, now - timedelta(minutes=minutes_ago))
     if e is None:
         raise HTTPException(409, "No timer is running")
     db.commit()

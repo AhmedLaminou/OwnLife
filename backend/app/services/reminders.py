@@ -27,6 +27,7 @@ from app.models import DayReview, Habit, Profile, User
 from app.services import notify, prayer
 from app.services.activitywatch import get_state
 from app.services.ledger import covered_seconds, daily_breakdown, entries_overlapping
+from app.services.records import running_timer
 from app.services.timeutil import parse_hhmm, range_utc, tz_of
 
 log = logging.getLogger("ownlife.reminders")
@@ -39,6 +40,8 @@ DEFAULTS: dict = {
     "bedtime_text": "Bedtime. Screen off, phone in another room.",
     "morning": True,
     "auto_review": True,
+    # "Still on it?" when a timer has run this long (then twice, three times as long); 0 = never.
+    "timer_nudge_minutes": 120,
 }
 LATE_LIMIT = timedelta(minutes=45)
 
@@ -183,6 +186,32 @@ def ensure_review(db: Session, settings: Settings, user: User, profile: Profile,
     return row
 
 
+def _timer_nudge(db: Session, user: User, prefs: dict, sent: dict, now: datetime, base: str, send) -> tuple[bool, str]:
+    """A timer left running: "still on it?" after N minutes, again after 2N and
+    3N, never more — a forgotten timer otherwise counts a whole night as work."""
+    running = running_timer(db, user.id)
+    for key in [k for k in sent if k.startswith("timer:")]:
+        if running is None or key != f"timer:{running.id}":
+            del sent[key]  # that timer was stopped: forget it
+    step = int(prefs.get("timer_nudge_minutes") or 0)
+    if not prefs["enabled"] or running is None or step <= 0:
+        return False, ""
+    elapsed = (now - running.started_at).total_seconds()
+    level = int(elapsed // (step * 60))
+    key = f"timer:{running.id}"
+    if not 1 <= level <= 3 or int(sent.get(key, 0)) >= level:
+        return False, ""
+    ok, detail = send(
+        f"Still on “{running.title}”?",
+        f"The timer has been running for {_hm(elapsed)}. If you switched to something else, "
+        "pause or stop it at the time you did.",
+        f"{base}/",
+        "Open the timer",
+    )
+    sent[key] = level
+    return True, "" if ok else detail
+
+
 def tick(settings: Settings, send=notify.send, now: datetime | None = None) -> list[str]:
     """One pass of the scheduler: send what is due, write yesterday's review."""
     from app.services.filesync import sync_owner
@@ -205,6 +234,10 @@ def tick(settings: Settings, send=notify.send, now: datetime | None = None) -> l
             state.last_error = None if ok else f"{slot.key}: {detail}"
             done.append(slot.key)
             log.info("Reminder %s for %s: %s", slot.key, slot.day, detail if not ok else "shown")
+        nudged, error = _timer_nudge(db, user, prefs, sent, now, base, send)
+        if nudged:
+            done.append("timer")
+            state.last_error = f"timer: {error}" if error else state.last_error
         tz = tz_of(profile.timezone)
         local = now.astimezone(tz)
         yesterday = local.date() - timedelta(days=1)

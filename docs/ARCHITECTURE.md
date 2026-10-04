@@ -159,6 +159,10 @@ segment with the same title, category, people and notes, and both carry the same
 `session` (the first segment's id). The pause is simply time no segment covers —
 free for whatever happened instead. Several timers can be paused at once; a pause
 older than 18 hours counts as finished. The timer shows the whole session's time.
+Starting, pausing and stopping all take "minutes ago" (forgetting the button is
+normal; a timer started 30 minutes ago stops the one that was running at that
+moment, not now), and a timer still running after 2 hours (setting) gets a
+"still on it?" notification, then again at 4 and 6 hours, never more.
 
 ## Money from the journal (`services/journal_money.py`)
 

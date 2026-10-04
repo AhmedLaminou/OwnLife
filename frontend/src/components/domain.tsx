@@ -243,6 +243,19 @@ export function Elapsed({ since }: { since: string }) {
   );
 }
 
+const AGO_CHOICES = [0, 5, 10, 15, 20, 30, 45, 60, 90, 120];
+
+/** "now", or so many minutes ago — for a timer started or stopped late. */
+function AgoSelect({ value, onChange, now, label }: { value: number; onChange: (v: number) => void; now: string; label: string }) {
+  return (
+    <Select value={value} onChange={(e) => onChange(Number(e.target.value))} aria-label={label} title={label} className="w-auto text-[13px]">
+      {AGO_CHOICES.map((m) => (
+        <option key={m} value={m}>{m === 0 ? now : `${m} min ago`}</option>
+      ))}
+    </Select>
+  );
+}
+
 export function TimerCard() {
   const { data, dataUpdatedAt } = useTimer();
   const tz = useTimeZone();
@@ -250,24 +263,30 @@ export function TimerCard() {
   const toast = useToast();
   const [title, setTitle] = useState("");
   const [cat, setCat] = useState<number | null>(null);
+  // "I started 20 minutes ago", "I stopped 10 minutes ago": forgetting the button is normal.
+  const [startedAgo, setStartedAgo] = useState(0);
+  const [stoppedAgo, setStoppedAgo] = useState(0);
   const start = useMutation({
-    mutationFn: () => api.post("/api/time/timer/start", { title: title.trim() || "Deep work", category_id: cat }),
+    mutationFn: () => api.post("/api/time/timer/start", { title: title.trim() || "Deep work", category_id: cat, minutes_ago: startedAgo }),
     onSuccess: () => {
       invalidate();
       setTitle("");
+      setStartedAgo(0);
     },
   });
   const stop = useMutation({
-    mutationFn: () => api.post<TimerEntry | null>("/api/time/timer/stop"),
+    mutationFn: () => api.post<TimerEntry | null>(`/api/time/timer/stop?minutes_ago=${stoppedAgo}`),
     onSuccess: (e) => {
       invalidate();
+      setStoppedAgo(0);
       if (e) toast(`Logged ${hm(e.session_seconds)} — ${e.title}`, "good");
     },
   });
   const pause = useMutation({
-    mutationFn: () => api.post<TimerEntry>("/api/time/timer/pause"),
+    mutationFn: () => api.post<TimerEntry>(`/api/time/timer/pause?minutes_ago=${stoppedAgo}`),
     onSuccess: (e) => {
       invalidate();
+      setStoppedAgo(0);
       toast(`Paused at ${hm(e.session_seconds)} — the time until you resume is not counted`);
     },
   });
@@ -296,9 +315,10 @@ export function TimerCard() {
             <p className="text-4xl font-semibold tracking-tight text-ink">
               <Elapsed since={sessionSince(running, dataUpdatedAt)} />
             </p>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               {running.category && <Badge>{running.category.name}</Badge>}
               <div className="flex-1" />
+              <AgoSelect value={stoppedAgo} onChange={setStoppedAgo} now="now" label="When you stopped" />
               <Button variant="secondary" icon={<Pause size={14} />} onClick={() => pause.mutate()} loading={pause.isPending}>
                 Pause
               </Button>
@@ -321,9 +341,12 @@ export function TimerCard() {
           >
             <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={paused.length ? "Something else meanwhile?" : "What are you starting?"} />
             <CategorySelect value={cat} onChange={setCat} />
-            <Button type="submit" variant="primary" className="w-full" icon={<Play size={15} />} loading={start.isPending}>
-              Start timer
-            </Button>
+            <div className="flex gap-2">
+              <AgoSelect value={startedAgo} onChange={setStartedAgo} now="starting now" label="When you started" />
+              <Button type="submit" variant="primary" className="flex-1" icon={<Play size={15} />} loading={start.isPending}>
+                Start timer
+              </Button>
+            </div>
             <ErrorNote error={start.error} />
           </motion.form>
         )}

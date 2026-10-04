@@ -95,6 +95,24 @@ def test_pause_then_resume_continues_the_same_session(client, categories):
     assert client.post("/api/time/timer/resume", json={}).status_code == 409
 
 
+def test_a_timer_can_start_and_stop_minutes_ago(client, categories):
+    from datetime import datetime, timedelta, timezone
+
+    client.post("/api/time/timer/start", json={"title": "Reading", "category_id": categories["Physics"]["id"],
+                                               "minutes_ago": 50})
+    # "I switched to linear algebra 30 minutes ago": the reading timer stops then
+    client.post("/api/time/timer/start", json={"title": "Linear algebra", "category_id": categories["Mathematics"]["id"],
+                                               "minutes_ago": 30})
+    stopped = client.post("/api/time/timer/stop", params={"minutes_ago": 10}).json()
+    assert stopped["title"] == "Linear algebra" and round(stopped["duration_seconds"] / 60) == 20
+    now = datetime.now(timezone.utc)
+    reading = next(e for e in client.get("/api/time/entries", params={
+        "start": (now - timedelta(days=1)).date().isoformat(), "end": (now + timedelta(days=1)).date().isoformat()}).json()
+        if e["title"] == "Reading")
+    assert round(reading["duration_seconds"] / 60) == 20  # 50 → 30 minutes ago
+    assert client.post("/api/time/timer/start", json={"title": "x", "minutes_ago": 721}).status_code == 422
+
+
 def test_a_paused_timer_can_be_finished_without_resuming(client, categories):
     client.post("/api/time/timer/start", json={"title": "Reading", "category_id": categories["Physics"]["id"]})
     p = client.post("/api/time/timer/pause").json()

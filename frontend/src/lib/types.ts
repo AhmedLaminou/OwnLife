@@ -559,6 +559,8 @@ export interface ReminderPrefs {
   bedtime_text: string;
   morning: boolean;
   auto_review: boolean;
+  /** "Still on it?" when a timer runs this long; 0 = never. */
+  timer_nudge_minutes: number;
 }
 
 export interface Prefs {
