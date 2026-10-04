@@ -138,9 +138,9 @@ one line.
 
 ## When two sources saw the same minutes (`services/ledger.effective_spans`)
 
-The order: entries you typed (form, quick-log, capture, assistant), then the
-YouTube extension's measured minutes, then **the timer**, then ActivityWatch, then
-history estimates last. The timer sits below measured YouTube because a timer
+The order: entries you typed (form, quick-log, capture, assistant, blocks read
+from your journal), then the YouTube extension's measured minutes, then **the
+timer**, then the window tracker, then ActivityWatch, then history estimates last. The timer sits below measured YouTube because a timer
 only knows when something started: if you switch to a video without pausing, the
 measured minutes of that video count, not the timer's. Measured YouTube *without*
 a category ranks below the timer, so a lecture from a channel that has no rule
@@ -229,6 +229,23 @@ Windows notifications shown through PowerShell 5.1's WinRT bridge — a fixed
 script on standard input, the text in an environment variable as XML — under the
 app name "OwnLife" (registered in `HKCU`, no administrator rights). Clicking one
 opens the right page (`/?capture=1`, the review of yesterday).
+
+## The window tracker (`services/wintrack.py`)
+
+A thread in the server asks Windows every 5 seconds which window is in front
+(`GetForegroundWindow`, the window's title, the program's file through
+`QueryFullProcessImageNameW`) and how long ago the keyboard or mouse was last
+used (`GetLastInputInfo`) — plain `ctypes`, nothing to install, nothing new for
+Smart App Control to judge. After 2 minutes without input nothing is counted;
+the lock screen and Windows' own surfaces (start menu, search) are ignored.
+Samples are classified by the rules (program, title) and gathered into blocks
+of one category, gaps under 2 minutes bridged; a block is written once it lasts
+a minute and extended every minute while it goes on (a block deleted from the
+ledger meanwhile stays deleted). In the precedence order it sits below the
+timer and above ActivityWatch, so running both never counts twice. Private and
+incognito windows keep no title, and window titles are replaced by program
+names in what a cloud model is shown. Browser tabs are classified by their
+title: Windows does not give the address.
 
 ## The YouTube extension (`extension/`, `services/watchlive.py`)
 

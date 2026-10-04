@@ -43,7 +43,7 @@ from app.routers import (
     system,
 )
 from app.security import CSRF_HEADER
-from app.services import filesync, journal_money, journal_time, reminders
+from app.services import filesync, journal_money, journal_time, reminders, wintrack
 from app.services.activitywatch import ActivityWatchError
 from app.services.backup import backup_if_due, make_backup, mirror_latest
 
@@ -143,7 +143,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 filesync.set_watcher(watcher)
                 watcher.start()
                 log.info("Watching %s (and the notes beside it)", settings.journal_sync_path)
+            if wintrack.start(settings) is not None:
+                log.info("Window tracker on (Settings → Integrations to switch it off)")
         yield
+        wintrack.stop()  # writes the block in progress
         if watcher is not None:
             watcher.stop()
             filesync.set_watcher(None)

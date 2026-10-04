@@ -11,6 +11,7 @@ import {
   Download,
   FileText,
   KeyRound,
+  Monitor,
   MonitorPlay,
   MoonStar,
   Plus,
@@ -23,7 +24,8 @@ import { useSearchParams } from "react-router";
 import { CategorySelect, KindDot, useInvalidateLedger } from "../components/domain";
 import { Badge, Button, Card, ErrorNote, Field, Input, PageHeader, Select, Spinner, Tabs, Textarea, Toggle, useToast } from "../components/ui";
 import { api } from "../lib/api";
-import { useCategories, useProfile, useToday } from "../lib/hooks";
+import { clock, hm } from "../lib/format";
+import { useCategories, useProfile, useTimeZone, useToday } from "../lib/hooks";
 import { CHART_KINDS, KIND_HINT, KIND_LABEL } from "../lib/kinds";
 import type {
   AiStatus,
@@ -41,6 +43,7 @@ import type {
   RemindersStatus,
   Rule,
   SyncStatus,
+  WindowTracker,
 } from "../lib/types";
 
 type Tab = "profile" | "rituals" | "privacy" | "ai" | "categories" | "integrations" | "data";
@@ -597,6 +600,52 @@ function SeedCard() {
   );
 }
 
+function WindowTrackerCard() {
+  const qc = useQueryClient();
+  const tz = useTimeZone();
+  const tracker = useQuery({
+    queryKey: ["window-tracker"],
+    queryFn: () => api.get<WindowTracker>("/api/integrations/window-tracker"),
+    refetchInterval: 30_000,
+  });
+  const set = useMutation({
+    mutationFn: (enabled: boolean) => api.put<WindowTracker>("/api/integrations/window-tracker", { enabled }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["window-tracker"] }),
+  });
+  const t = tracker.data;
+  return (
+    <Card title="Window tracker" subtitle="Which program and window you use, read from Windows every 5 seconds — nothing to install" action={<Monitor size={18} className="text-ink-3" />}>
+      {!t ? (
+        <Spinner />
+      ) : !t.available ? (
+        <Status ok={false}>Only on Windows.</Status>
+      ) : (
+        <div className="space-y-2.5">
+          <Toggle checked={t.enabled} onChange={(v) => set.mutate(v)} label="Track the computer" />
+          <Status ok={t.enabled && t.running && !t.error}>
+            {!t.enabled
+              ? "Off: nothing is recorded."
+              : !t.running
+                ? "Not running: it starts with OwnLife (restart it)."
+                : t.error
+                  ? `Running, with an error: ${t.error}`
+                  : t.last
+                    ? `Running — ${t.last.app.replace(/\.exe$/i, "")} at ${clock(t.last.at, tz)}`
+                    : "Running — idle (it counts only while you use the keyboard or mouse)"}
+          </Status>
+          <p className="text-[13px] text-ink-3">Today: {hm(t.today_seconds)} in {t.today_blocks} block{t.today_blocks === 1 ? "" : "s"}.</p>
+          <p className="text-[12px] leading-relaxed text-ink-3">
+            Blocks are filed by your rules (program or window title: Settings → Categories & rules) and fill only the time your own entries,
+            the timer and the YouTube extension leave free. After 2 minutes without keyboard or mouse nothing is counted. Private and
+            incognito windows keep no title; window titles stay on this machine, even with a cloud model.
+          </p>
+          <ErrorNote error={set.error} />
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function IntegrationsTab() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -613,7 +662,8 @@ function IntegrationsTab() {
   const a = aw.data;
   return (
     <div className="grid gap-5 xl:grid-cols-2">
-      <Card title="ActivityWatch" subtitle="Automatic, local time tracking: apps, websites, YouTube videos — real minutes" action={<Activity size={18} className="text-ink-3" />}>
+      <WindowTrackerCard />
+      <Card title="ActivityWatch" subtitle="Optional now: the window tracker above does the same without installing anything" action={<Activity size={18} className="text-ink-3" />}>
         {!a ? (
           <Spinner />
         ) : (

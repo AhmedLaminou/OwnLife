@@ -198,6 +198,15 @@ def reapply_rules(user: CurrentUser, db: DB) -> dict:
         if new != e.category_id:
             e.category_id = new
             changed += 1
+    windows = 0
+    for e in db.scalars(select(TimeEntry).where(
+            TimeEntry.user_id == user.id, TimeEntry.source == "window", TimeEntry.category_locked.is_(False))):
+        meta = e.meta or {}  # the block's main window: its most seen title and program
+        app = next(iter(meta.get("apps") or {}), None)
+        new = rules.classify(Activity(title=(meta.get("titles") or [None])[0], app=app))
+        if new != e.category_id:
+            e.category_id = new
+            windows += 1
     rebuilt = 0
     history = WatchEvent.source.in_(HISTORY_SOURCES)
     first = db.scalar(select(func.min(WatchEvent.occurred_at)).where(WatchEvent.user_id == user.id, history))
@@ -206,4 +215,5 @@ def reapply_rules(user: CurrentUser, db: DB) -> dict:
         rebuilt = rebuild_sessions(db, user.id, rules, first, last)
     measured = watchlive.rebuild(db, user.id, rules)
     db.commit()
-    return {"activitywatch_reclassified": changed, "youtube_blocks_rebuilt": rebuilt, "extension_segments_refiled": measured}
+    return {"activitywatch_reclassified": changed, "window_blocks_reclassified": windows,
+            "youtube_blocks_rebuilt": rebuilt, "extension_segments_refiled": measured}

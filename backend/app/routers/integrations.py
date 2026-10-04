@@ -1,18 +1,38 @@
-"""ActivityWatch: status and sync."""
+"""Automatic tracking: the built-in window tracker, and ActivityWatch."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
 from app.config import get_settings
-from app.db import SessionLocal
-from app.deps import DB, CurrentUser
+from app.db import SessionLocal, utcnow
+from app.deps import DB, CurrentProfile, CurrentUser
 from app.serializers import iso
 from app.services import activitywatch as aw
+from app.services import wintrack
 from app.services.rules import load_ruleset
+from app.services.timeutil import day_start_utc, local_today, tz_of
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"])
+
+
+class WindowTrackerIn(BaseModel):
+    enabled: bool
+
+
+@router.get("/window-tracker")
+def window_tracker(user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    tz = tz_of(profile.timezone)
+    return wintrack.status(db, user.id, profile, day_start_utc(local_today(tz), tz), utcnow())
+
+
+@router.put("/window-tracker")
+def window_tracker_set(body: WindowTrackerIn, user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    profile.prefs = {**(profile.prefs or {}), "window_tracker": {"enabled": body.enabled}}
+    db.commit()
+    return window_tracker(user, profile, db)
 
 
 @router.get("/activitywatch")

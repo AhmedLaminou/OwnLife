@@ -65,8 +65,10 @@ def entry_kind(e: TimeEntry) -> str:
 # without a category does not override a timer: a lecture from a channel that
 # has no rule yet must not erase study time. Entries of the same rank all
 # count — you can recite Quran during the commute, and both are true.
-SOURCE_RANK = {"extension": 1, "timer": 2, "activitywatch": 3, "youtube_takeout": 4}
-AUTOMATIC = ("extension", "activitywatch", "youtube_takeout")
+# The built-in window tracker ("window") and ActivityWatch see the same thing;
+# when both run, the built-in one is counted.
+SOURCE_RANK = {"extension": 1, "timer": 2, "window": 3, "activitywatch": 3.5, "youtube_takeout": 4}
+AUTOMATIC = ("extension", "window", "activitywatch", "youtube_takeout")
 
 
 def source_rank(e: TimeEntry) -> float:

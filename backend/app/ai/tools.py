@@ -36,6 +36,7 @@ from app.services.timeutil import (
     range_utc,
     tz_of,
 )
+from app.services.wintrack import app_name
 from app.services.youtube import watched
 
 LIFE_AREAS = ("education", "family", "faith", "health", "work", "move", "travel", "achievement",
@@ -206,7 +207,10 @@ def build_tools(ctx: ToolContext) -> list[BaseTool]:
                     f"{e.started_at.astimezone(tz):%H:%M}–now (running)"
                 )
                 cat = e.category.name if e.category else "uncategorised"
-                lines.append(f"- {span} {e.title} [{cat}] {_h(((end or now) - e.started_at).total_seconds())}")
+                title = e.title
+                if ctx.for_cloud and e.source == "window":  # window titles stay on this machine
+                    title = ", ".join(app_name(a) for a in (e.meta or {}).get("apps", {})) or "computer"
+                lines.append(f"- {span} {title} [{cat}] {_h(((end or now) - e.started_at).total_seconds())}")
             blocks = db.scalars(
                 select(PlanBlock).where(PlanBlock.user_id == uid, PlanBlock.plan_date == d).order_by(PlanBlock.start_minute)
             ).all()

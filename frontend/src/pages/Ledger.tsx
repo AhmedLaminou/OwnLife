@@ -16,12 +16,15 @@ const SOURCE_LABEL: Record<string, string> = {
   timer: "timer",
   quick: "quick-log",
   ai: "assistant",
+  journal: "journal",
+  window: "window tracker",
   activitywatch: "ActivityWatch",
   extension: "YouTube, measured",
   youtube_takeout: "YouTube history",
 };
 
 const SEEN_BY: Record<string, string> = {
+  window: "The window tracker",
   activitywatch: "ActivityWatch",
   extension: "The YouTube extension",
   youtube_takeout: "Your YouTube or Chrome history",

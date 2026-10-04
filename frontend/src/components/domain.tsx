@@ -192,6 +192,8 @@ export const SOURCE_LABEL: Record<string, string> = {
   timer: "the timer",
   quick: "quick-log",
   ai: "the assistant",
+  journal: "your journal",
+  window: "the window tracker",
   activitywatch: "ActivityWatch",
   extension: "the YouTube extension (measured)",
   youtube_takeout: "your YouTube or Chrome history (estimated)",

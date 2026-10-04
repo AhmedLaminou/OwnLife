@@ -612,6 +612,17 @@ export interface Transaction {
   source: string;
 }
 
+/** The built-in window tracker (Settings → Integrations). */
+export interface WindowTracker {
+  available: boolean;
+  enabled: boolean;
+  running: boolean;
+  last: { app: string; at: string } | null;
+  error: string | null;
+  today_seconds: number;
+  today_blocks: number;
+}
+
 /** The second copy of the backups, off this disk (BACKUP_MIRROR_DIR). */
 export interface BackupMirror {
   dir: string | null;

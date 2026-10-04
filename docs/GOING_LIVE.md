@@ -122,7 +122,16 @@ YouTube gives no app your watch history (removed from its API in 2016). So:
 Then give categories to your top channels (Watching → Channels): each choice
 becomes a rule, and the history and measured minutes are re-filed.
 
-## 6. ActivityWatch — the rest of the laptop (optional)
+## 6. The window tracker — the rest of the laptop, built in
+
+On by default: OwnLife itself notes which program and window you use, every 5
+seconds, only while you use the keyboard or mouse (Settings → Integrations shows
+it, and switches it off). Give its blocks categories with rules on the program
+(`app Code.exe → Building projects`) or the window title (`title Khan Academy →
+Mathematics`); browser tabs are known only by their title. ActivityWatch below
+is no longer needed for this.
+
+## 6b. ActivityWatch — optional
 
 Records which app and which website is on screen, minute by minute, and whether
 you are at the keyboard. Local and open source.
