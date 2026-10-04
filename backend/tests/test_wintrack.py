@@ -98,6 +98,18 @@ def test_private_windows_keep_no_title_and_the_lock_screen_counts_nothing(client
     assert meta["titles"] == ["(private window)"] and "secret" not in str(meta)
 
 
+def test_a_restart_continues_the_block_instead_of_starting_another(client):
+    uid, fake = _uid(client), FakeWindows()
+    first = fake.tracker()
+    t = _run(first, uid, fake, T0, 3, Sample("notepad.exe", "Notes"))
+    with SessionLocal() as db:  # the server stops (writes its block) and starts again a minute later
+        first._close(db, uid)
+    second = fake.tracker()
+    _run(second, uid, fake, t + timedelta(minutes=1), 4, Sample("notepad.exe", "Notes"))
+    _flush(second, uid)
+    assert _entries(uid) == [("Notes", None, 8.0)]  # one block, 3 + 1 + 4 minutes
+
+
 def test_a_block_deleted_from_the_ledger_while_open_stays_deleted(client):
     uid, fake = _uid(client), FakeWindows()
     tr = fake.tracker()

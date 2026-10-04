@@ -75,7 +75,7 @@ From `backend/`:
 | `.\.venv\Scripts\python.exe -m app.cli reindex` | rebuild the search index with progress |
 | `.\.venv\Scripts\python.exe -m app.cli backup` | backup now (also automatic daily, and before every database upgrade) |
 | `.\.venv\Scripts\python.exe -m app.cli reset-password` | forgotten password (local only) |
-| `.\.venv\Scripts\python.exe -m pytest tests -q` | 121 backend tests |
+| `.\.venv\Scripts\python.exe -m pytest tests -q` | 122 backend tests |
 
 From `frontend/`: `npm run dev`, `npm run build`, `npm test`, `npm run typecheck`.
 

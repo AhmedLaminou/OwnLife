@@ -370,7 +370,7 @@ the venv's `pythonw.exe` (signed by the Python Software Foundation).
 
 ## Tests
 
-- Backend: `python -m pytest tests -q` — 121 tests; each uses a fresh temporary
+- Backend: `python -m pytest tests -q` — 122 tests; each uses a fresh temporary
   database, a throwaway account and its own folder of Markdown files shaped like
   the real journal (CRLF, trailing spaces, no final newline); AI off unless a
   scripted fake model is injected, ActivityWatch mocked, notifications sent to a

@@ -230,6 +230,22 @@ class Tracker:
                 e.title = _label(b)
             db.commit()
             return
+        # The same category less than 2 minutes before (the server restarted, a short
+        # pause): that block goes on instead of a new one starting.
+        prev = db.scalar(select(TimeEntry).where(
+            TimeEntry.user_id == user_id, TimeEntry.source == SOURCE, TimeEntry.ended_at >= b.start - MERGE_GAP,
+            TimeEntry.started_at <= b.start).order_by(TimeEntry.ended_at.desc()))
+        if prev is not None and prev.category_id == b.category_id and not prev.category_locked:
+            old = prev.meta or {}
+            b.apps.update({k: float(v) for k, v in (old.get("apps") or {}).items()})
+            b.titles.update({t: SAMPLE.total_seconds() for t in old.get("titles") or [] if t not in b.titles})
+            b.start, b.entry_id = prev.started_at, prev.id
+            prev.ended_at = max(prev.ended_at, b.end)
+            prev.title = _label(b)
+            prev.meta = {"apps": {k: round(v) for k, v in b.apps.most_common(5)},
+                         "titles": [t for t, _ in b.titles.most_common(5)]}
+            db.commit()
+            return
         e = TimeEntry(user_id=user_id, title=_label(b), category_id=b.category_id, started_at=b.start,
                       ended_at=b.end, source=SOURCE, source_ref=f"win:{b.start.isoformat()}", meta=meta)
         db.add(e)
