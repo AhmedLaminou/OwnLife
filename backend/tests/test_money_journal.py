@@ -132,6 +132,26 @@ def test_the_automatic_scan_waits_until_the_page_is_quiet(client, monkeypatch):
     assert jm.tick(get_settings(), now=now + timedelta(hours=2)) == []  # switched off
 
 
+def test_a_private_page_never_goes_to_a_cloud_model(client, monkeypatch):
+    uid = _setup(client)
+    client.post("/api/journal", json={"entry_date": "2026-09-02", "body": "I paid 300 FCFA for a secret.",
+                                      "is_private": True})
+    seen: list[str] = []
+
+    def spy(settings, user, profile, excerpts):
+        seen.extend(text for _, _, text in excerpts)
+        return fake(settings, user, profile, excerpts)
+
+    monkeypatch.setattr(jm, "sends_to_cloud", lambda settings, profile: True)
+    assert jm.scan(get_settings(), uid, extractor=spy).days == 2
+    assert any("bread" in t for t in seen) and not any("secret" in t for t in seen)
+
+    seen.clear()  # with only a local model in the chain, the private page may be read
+    monkeypatch.setattr(jm, "sends_to_cloud", lambda settings, profile: False)
+    jm.scan(get_settings(), uid, rescan_all=True, extractor=spy)
+    assert any("secret" in t for t in seen)
+
+
 def test_scanning_needs_a_model(client):
     r = client.post("/api/money/journal/scan", json={})
     assert r.status_code == 400 and "AI is off" in r.json()["detail"]

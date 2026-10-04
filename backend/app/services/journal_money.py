@@ -207,15 +207,23 @@ def changed_entries(db: Session, user_id: int, cursor: dict, quiet_before: datet
     return sorted(out, key=lambda e: e.entry_date)
 
 
+def sends_to_cloud(settings: Settings, profile: Profile) -> bool:
+    return any(c.is_cloud for c in chat_models(settings, profile))
+
+
 def scan(settings: Settings, user_id: int, rescan_all: bool = False, extractor: Extractor | None = None) -> ScanResult:
     """Reads the changed pages and stores what the model finds. No database
-    session is open while the model answers."""
+    session is open while the model answers. A page marked private is never
+    read when a cloud model is in the chain (it is counted as read, and read
+    again only if it changes)."""
     with SessionLocal() as db:
         user, profile = db.get(User, user_id), db.get(Profile, user_id)
         state = get_state(db, user_id, PROVIDER)
         days = {} if rescan_all else dict((state.cursor or {}).get("days") or {})
         entries = changed_entries(db, user_id, days)
-        pages = [(e.id, e.entry_date, _hash(e.body), money_clauses(e.body)) for e in entries]
+        cloud = sends_to_cloud(settings, profile)
+        pages = [(e.id, e.entry_date, _hash(e.body), [] if cloud and e.is_private else money_clauses(e.body))
+                 for e in entries]
         db.commit()
     excerpts: list[Excerpt] = [(eid, d, c) for eid, d, _, clauses in pages for c in clauses]
     result = ScanResult(days=len(pages), excerpts=len(excerpts))
