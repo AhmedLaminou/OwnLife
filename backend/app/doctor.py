@@ -49,6 +49,9 @@ def run(online: bool = False) -> int:
                "version in requirements.txt, or check with: python -c \"import <module>\"")
     else:
         report(OK, f"{len(COMPILED)} compiled modules load (Smart App Control lets them through)")
+    if getattr(sys.modules.get("jiter"), "__name__", "") == "app._jiter_shim":
+        report(WARN, "Smart App Control blocks jiter: OwnLife uses its pure-Python stand-in (app/_jiter_shim.py)",
+               "Nothing to do; the AI features work. The check counts the stand-in among the modules that load.")
 
     con = sqlite3.connect(":memory:")
     try:
