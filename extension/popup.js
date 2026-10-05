@@ -30,6 +30,23 @@ async function render() {
   document.getElementById("status").textContent = waiting && s.status !== "ok" ? `${label} (${waiting} waiting)` : label;
   document.getElementById("status").title = s.lastError || "";
   document.getElementById("today").textContent = s.today ? hm(s.today.seconds) : "—";
+  const noise = s.today && s.today.noise;
+  document.getElementById("noise-card").hidden = !noise;
+  if (noise) {
+    const budget = noise.budget_seconds || 0;
+    const over = noise.seconds >= budget;
+    const near = !over && noise.seconds >= budget - (noise.warn_seconds || 0);
+    const big = document.getElementById("noise");
+    big.textContent = hm(noise.seconds);
+    big.className = `big ${over ? "over" : near ? "near" : ""}`;
+    document.getElementById("noise-budget").textContent = over
+      ? `${hm(noise.seconds - budget)} over your ${hm(budget)}`
+      : `of ${hm(budget)} · ${hm(budget - noise.seconds)} left`;
+    const bar = document.getElementById("noise-bar");
+    bar.style.width = `${budget ? Math.min(100, (100 * noise.seconds) / budget) : 100}%`;
+    bar.className = over ? "over" : near ? "near" : "";
+    document.getElementById("noise-cats").replaceChildren(...noise.categories.slice(0, 4).map((c) => row(c.name, hm(c.seconds))));
+  }
   const list = document.getElementById("channels");
   list.replaceChildren(...((s.today && s.today.channels) || []).map((c) => row(c.channel, hm(c.seconds))));
   document.getElementById("open").onclick = () =>

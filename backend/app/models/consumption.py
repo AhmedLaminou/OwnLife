@@ -37,6 +37,9 @@ class MediaItem(UserOwned, Timestamps, Base):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("categories.id", ondelete="SET NULL")
     )
+    # A single video's category: "you" chose it, the local "model" did, or the
+    # model only made a "guess" (not applied; waits for you). None: never sorted.
+    sorted_by: Mapped[str | None] = mapped_column(String(10))
     status: Mapped[str] = mapped_column(String(20), default="none")  # want | in_progress | done | dropped | none
     progress_current: Mapped[float | None] = mapped_column(Float)
     progress_total: Mapped[float | None] = mapped_column(Float)

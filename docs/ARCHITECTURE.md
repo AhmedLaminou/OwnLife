@@ -230,6 +230,13 @@ script on standard input, the text in an environment variable as XML — under t
 app name "OwnLife" (registered in `HKCU`, no administrator rights). Clicking one
 opens the right page (`/?capture=1`, the review of yesterday).
 
+The same loop watches the **noise budget** (`profile.noise_budget_hours`): today's
+noise is the ledger's own total — every source, no minute counted twice — and a
+notification comes 15 minutes before it is spent, when it is, then every 15
+minutes past it (`noise_level`; each level once a day, and a jump straight to a
+higher level sends one notification, not the ones skipped). The extension gets
+the same number with every upload and shows it on its icon.
+
 ## The window tracker (`services/wintrack.py`)
 
 A thread in the server asks Windows every 5 seconds which window is in front
@@ -258,7 +265,41 @@ nothing else). On the server, heartbeats become runs per video (a gap over 45 s
 ends a run), runs become *segments* (merged with any stored segment they touch,
 so late or out-of-order batches still give one segment), and segments become
 ledger blocks: same category, less than 3 minutes apart → one block. Channel
-names come from the page, else from YouTube's public oEmbed endpoint.
+names come from the page, else from YouTube's public oEmbed endpoint. Uploads
+and every re-filing of these blocks share one lock (`watchlive.LOCK`), so a
+background sorting never interleaves with an upload.
+
+**Strict mode** (on by default, Watching → Sorting): a video that nothing places
+lands in the noise category "YouTube, not sorted yet" instead of staying without
+a category, so it counts against the noise budget. Its block is marked
+`meta.unsorted` and ranks like a video without a category: it never overrides a
+running timer — a lecture from a channel nobody sorted yet must not erase study
+time.
+
+The icon's badge shows today's noise (grey, amber in the last 15 minutes of the
+budget, red past it); the service worker asks `/api/ingest/ping` once a minute
+when nothing was uploaded, since noise grows outside YouTube too.
+
+## Sorting videos (`services/videosort.py`)
+
+Order of precedence for a single video: a category **you** chose for it, then
+your **rules**, then the **local model**'s answer, then strict mode's noise.
+Shortly after an upload with videos nothing places (at most once a minute, 10
+minutes after an error), a background thread:
+
+1. finds the channel of recent videos that arrived without one (oEmbed) — a
+   channel rule may then place them;
+2. shows the remaining videos of the last 7 days to the **Ollama** model, 25 at a
+   time: title and channel, your non-private categories, structured output
+   (`json_schema`). Never a cloud model, whatever the AI mode;
+3. stores each answer on the video's `media_items` row (`sorted_by`): a sure
+   answer (`model`) applies, an unsure one (`guess`) does not — the video stays
+   "not sorted yet" and waits on the Watching page with the guess pre-filled;
+4. re-files the blocks those videos are in.
+
+Watching → *Sorting what you watch* lists what waits (confirm the guess, choose
+another category, or sort the whole channel — a rule `^channel$`) and what the
+model sorted, to correct.
 
 ## YouTube history files (`services/youtube.py`)
 
@@ -363,14 +404,19 @@ Enforced on this laptop: unsigned compiled files it does not know get blocked �
 including pip's `.exe` launchers, hence `python -m …` everywhere. Checked
 2026-10-02: every compiled Python dependency (pydantic-core, uuid-utils, orjson,
 jiter, tiktoken, argon2, numpy…) and the frontend's native tools (Rolldown,
-Tailwind's Oxide, LightningCSS) load. TypeScript is pinned to 5.9 because 7.x
+Tailwind's Oxide, LightningCSS) load. A verdict can change: on 2026-10-05 it
+started refusing `jiter` (same file, same version), which the OpenAI client
+imports on the first model call — every AI feature failed. `app/__init__.py`
+now puts a pure-Python stand-in (`app/_jiter_shim.py`) in its place when the
+compiled module cannot load; the client uses it only in streaming helpers that
+LangChain does not call. TypeScript is pinned to 5.9 because 7.x
 ships native binaries. `python -m app.doctor` re-checks all of this. Notifications
 go through Windows PowerShell 5.1 (signed by Microsoft); the background start uses
 the venv's `pythonw.exe` (signed by the Python Software Foundation).
 
 ## Tests
 
-- Backend: `python -m pytest tests -q` — 122 tests; each uses a fresh temporary
+- Backend: `python -m pytest tests -q` — 130 tests; each uses a fresh temporary
   database, a throwaway account and its own folder of Markdown files shaped like
   the real journal (CRLF, trailing spaces, no final newline); AI off unless a
   scripted fake model is injected, ActivityWatch mocked, notifications sent to a

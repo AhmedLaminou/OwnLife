@@ -5,6 +5,10 @@
                         clean streak of the habit you are quitting
     wake time           yesterday in one line, today's Fajr, and yesterday's
                         review written (facts always; prose when a model is on)
+    any time            the noise budget: 15 minutes before it is spent, when
+                        it is, then every 15 minutes past it — counted from
+                        everything the ledger knows of today (the YouTube
+                        extension, the window tracker, your own entries)
 
 Times come from the profile (its wake and bed times). A reminder is sent once per
 day, and skipped if the laptop was off at the time and more than 45 minutes have
@@ -26,7 +30,7 @@ from app.db import SessionLocal, utcnow
 from app.models import DayReview, Habit, Profile, User
 from app.services import notify, prayer
 from app.services.activitywatch import get_state
-from app.services.ledger import covered_seconds, daily_breakdown, entries_overlapping
+from app.services.ledger import covered_seconds, daily_breakdown, entries_overlapping, entry_kind, split_by_day
 from app.services.records import running_timer
 from app.services.timeutil import parse_hhmm, range_utc, tz_of
 
@@ -42,6 +46,12 @@ DEFAULTS: dict = {
     "auto_review": True,
     # "Still on it?" when a timer has run this long (then twice, three times as long); 0 = never.
     "timer_nudge_minutes": 120,
+    # The noise budget (Settings → profile): a warning this many minutes before
+    # it is spent (0 = none), a notification when it is, then one every
+    # `noise_repeat_minutes` past it (0 = only once).
+    "noise_alert": True,
+    "noise_warn_minutes": 15,
+    "noise_repeat_minutes": 15,
 }
 LATE_LIMIT = timedelta(minutes=45)
 
@@ -62,6 +72,11 @@ def app_url(settings: Settings) -> str:
 def _hm(seconds: float) -> str:
     m = int(round(seconds / 60))
     return f"{m // 60}h{m % 60:02d}"
+
+
+def _dur(seconds: float) -> str:
+    m = int(round(seconds / 60))
+    return f"{m} min" if m < 60 else _hm(seconds)
 
 
 @dataclass
@@ -212,6 +227,58 @@ def _timer_nudge(db: Session, user: User, prefs: dict, sent: dict, now: datetime
     return True, "" if ok else detail
 
 
+def noise_today(db: Session, user_id: int, profile: Profile, now: datetime) -> dict:
+    """Today's noise so far, from every source (no minute counted twice), and
+    the budget it is measured against."""
+    tz = tz_of(profile.timezone)
+    today = now.astimezone(tz).date()
+    lo, hi = range_utc(today, today, tz)
+    by = split_by_day(entries_overlapping(db, user_id, lo, hi), today, today, tz, now,
+                      key=lambda e: (entry_kind(e), e.category.name if e.category else ""))[today]
+    noise = sorted(((name, secs) for (kind, name), secs in by.items() if kind == "noise"), key=lambda x: -x[1])
+    return {"seconds": round(sum(secs for _, secs in noise)), "budget_seconds": round(profile.noise_budget_hours * 3600),
+            "categories": [{"name": n, "seconds": round(v)} for n, v in noise]}
+
+
+def noise_level(seconds: float, budget: float, warn: float, repeat: float) -> int:
+    """0 nothing to say · 1 the budget is nearly spent · 2 spent · 3, 4… each
+    `repeat` seconds past it."""
+    if seconds < 60:
+        return 0
+    if seconds >= budget:
+        return 2 + (int((seconds - budget) // repeat) if repeat > 0 else 0)
+    return 1 if 0 < warn < budget and seconds >= budget - warn else 0
+
+
+def _noise_alert(db: Session, user: User, profile: Profile, prefs: dict, sent: dict, now: datetime, base: str,
+                 send) -> tuple[bool, str]:
+    """The noise budget, while the day goes: a word before it is spent, when it
+    is, and every quarter of an hour past it — each once."""
+    if not prefs["enabled"] or not prefs["noise_alert"]:
+        return False, ""
+    n = noise_today(db, user.id, profile, now)
+    day = now.astimezone(tz_of(profile.timezone)).date().isoformat()
+    level = noise_level(n["seconds"], n["budget_seconds"], int(prefs["noise_warn_minutes"] or 0) * 60,
+                        int(prefs["noise_repeat_minutes"] or 0) * 60)
+    last_day, last = (sent.get("noise") or [None, 0])[:2]
+    if level == 0 or (last_day == day and last >= level):
+        return False, ""
+    spent, budget = n["seconds"], n["budget_seconds"]
+    detail = ", ".join(f"{c['name']} {_dur(c['seconds'])}" for c in n["categories"][:3])
+    if level == 1:
+        title = f"{_dur(budget - spent)} of noise left today"
+        body = f"Noise so far: {_dur(spent)} of your {_hm(budget)} — {detail}."
+    elif level == 2:
+        title = "Your hour of noise is spent" if budget == 3600 else f"Your {_hm(budget)} of noise is spent"
+        body = f"Noise today: {_dur(spent)} — {detail}. The rest of the day is for your real work."
+    else:
+        title = f"Noise: {_dur(spent - budget)} over your budget"
+        body = f"Noise today: {_dur(spent)} of {_hm(budget)} — {detail}. Close the tab?"
+    ok, info = send(title, body, f"{base}/", "See today")
+    sent["noise"] = [day, level]
+    return True, "" if ok else info
+
+
 def tick(settings: Settings, send=notify.send, now: datetime | None = None) -> list[str]:
     """One pass of the scheduler: send what is due, write yesterday's review."""
     from app.services.filesync import sync_owner
@@ -238,6 +305,10 @@ def tick(settings: Settings, send=notify.send, now: datetime | None = None) -> l
         if nudged:
             done.append("timer")
             state.last_error = f"timer: {error}" if error else state.last_error
+        warned, error = _noise_alert(db, user, profile, prefs, sent, now, base, send)
+        if warned:
+            done.append("noise")
+            state.last_error = f"noise: {error}" if error else state.last_error
         tz = tz_of(profile.timezone)
         local = now.astimezone(tz)
         yesterday = local.date() - timedelta(days=1)

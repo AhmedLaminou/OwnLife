@@ -2,7 +2,7 @@
 
 import sys
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 try:  # the OpenAI client needs it; Smart App Control may refuse its compiled module
     import jiter  # noqa: F401

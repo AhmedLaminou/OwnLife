@@ -102,6 +102,16 @@ YouTube gives no app your watch history (removed from its API in 2016). So:
   3. Play a video: its real minutes (pauses excluded) appear in the ledger within
      a minute, filed by your channel rules. While OwnLife is off, the extension
      keeps the minutes and sends them later.
+  4. After an update of the extension (0.2.0 brought the noise badge): back to
+     `chrome://extensions` → OwnLife → the **reload** arrow, then refresh the
+     YouTube tabs that were open.
+
+  The extension's icon shows today's noise in minutes — grey, amber when 15
+  minutes of the budget are left, red past it — and a Windows notification comes
+  at the same moments (Settings → Rituals → Reminders). In **strict mode** (on;
+  Watching → Sorting) a video nothing places counts as noise until it is sorted:
+  the local model sorts most new videos by itself within a minute, and asks you
+  about the rest on the Watching page.
 - **The past → Google Takeout** (<https://takeout.google.com>), one of two files,
   imported in Watching → **Import a history**:
   - YouTube's own history: *Deselect all* → *YouTube and YouTube Music* → keep only

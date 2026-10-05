@@ -525,8 +525,37 @@ export interface YoutubeStats {
   channel_lookup: { state: "idle" | "running" | "error"; done: number; total: number; found?: number; error?: string | null };
 }
 
+/** A video the extension measured, for sorting (Watching → YouTube). */
+export interface SortedVideo {
+  video_id: string;
+  title: string;
+  channel: string | null;
+  seconds: number;
+  last: string | null;
+  url: string;
+  /** Its category — or, for a video still to sort, the model's guess. */
+  category: Category | null;
+  /** The model already looked at it (and could not tell). */
+  asked?: boolean;
+}
+
+export interface YoutubeSorting {
+  prefs: { strict: boolean; sort: boolean };
+  ai: boolean;
+  model: string;
+  status: { state: "idle" | "running" | "error"; at?: string; asked?: number; sorted?: number; guesses?: number; model?: string; error?: string | null };
+  unsorted_category: string;
+  to_sort: SortedVideo[];
+  by_model: SortedVideo[];
+}
+
 export interface MeasuredToday {
-  today: { seconds: number; channels: { channel: string; seconds: number }[] };
+  today: {
+    seconds: number;
+    channels: { channel: string; seconds: number }[];
+    /** Today's noise from every source, against the budget (the extension's badge). */
+    noise: { seconds: number; budget_seconds: number; warn_seconds: number; categories: { name: string; seconds: number }[] };
+  };
   last_seen: string | null;
   segments: { title: string; channel: string | null; start: string; end: string; seconds: number; url: string }[];
 }
@@ -561,6 +590,12 @@ export interface ReminderPrefs {
   auto_review: boolean;
   /** "Still on it?" when a timer runs this long; 0 = never. */
   timer_nudge_minutes: number;
+  /** A notification as the day's noise reaches its budget (Settings → Profile). */
+  noise_alert: boolean;
+  /** Minutes before the budget is spent for a first warning; 0 = none. */
+  noise_warn_minutes: number;
+  /** Past the budget, again every N minutes; 0 = only once. */
+  noise_repeat_minutes: number;
 }
 
 export interface Prefs {

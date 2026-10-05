@@ -16,7 +16,7 @@ in weeks into a working system:
 | **Assistant** | Chat with your record (LangGraph agent with 21 tools + RAG): it reads the ledger, YouTube, money, habits, prayer times and life events, logs and plans; capture a day in free text, undo what it did, a review of each day |
 | **Goals** | [BigVision] → objectives → milestones, hours invested from the ledger |
 | **Habits** | Built habits (some evaluated from the data itself), quit habits with clean days, urges and relapse patterns |
-| **Watching** | YouTube minutes measured live by the OwnLife extension, the past from Google Takeout (YouTube's or Chrome's history); books and courses |
+| **Watching** | YouTube minutes measured live by the OwnLife extension — new videos sorted by the local model, the rest counted as noise until you sort them; a notification and a red badge when the day's noise budget is spent; the past from Google Takeout; books and courses |
 | **Money / People** | FCFA in and out, the amounts written in your journal found and proposed by themselves; who the time is spent with |
 
 ## Start
@@ -75,7 +75,7 @@ From `backend/`:
 | `.\.venv\Scripts\python.exe -m app.cli reindex` | rebuild the search index with progress |
 | `.\.venv\Scripts\python.exe -m app.cli backup` | backup now (also automatic daily, and before every database upgrade) |
 | `.\.venv\Scripts\python.exe -m app.cli reset-password` | forgotten password (local only) |
-| `.\.venv\Scripts\python.exe -m pytest tests -q` | 122 backend tests |
+| `.\.venv\Scripts\python.exe -m pytest tests -q` | 130 backend tests |
 
 From `frontend/`: `npm run dev`, `npm run build`, `npm test`, `npm run typecheck`.
 

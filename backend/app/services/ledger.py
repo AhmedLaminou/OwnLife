@@ -72,7 +72,8 @@ AUTOMATIC = ("extension", "window", "activitywatch", "youtube_takeout")
 
 
 def source_rank(e: TimeEntry) -> float:
-    if e.source == "extension" and e.category_id is None:
+    # "unsorted": strict mode filed it as noise only because nothing sorted it yet
+    if e.source == "extension" and (e.category_id is None or (e.meta or {}).get("unsorted") and not e.category_locked):
         return 2.5
     return SOURCE_RANK.get(e.source, 0)
 

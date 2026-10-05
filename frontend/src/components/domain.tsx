@@ -25,11 +25,14 @@ export function CategorySelect({
   value,
   onChange,
   allowNone = true,
+  noneLabel = "Uncategorised",
   className,
 }: {
   value: number | null;
   onChange: (id: number | null) => void;
   allowNone?: boolean;
+  /** The text of the empty choice. */
+  noneLabel?: string;
   className?: string;
 }) {
   const { data: cats = [] } = useCategories();
@@ -41,7 +44,7 @@ export function CategorySelect({
   }, [cats]);
   return (
     <Select value={value ?? ""} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)} className={className}>
-      {allowNone && <option value="">Uncategorised</option>}
+      {allowNone && <option value="">{noneLabel}</option>}
       {groups.map((g) => (
         <optgroup key={g.kind} label={g.kind === "destructive" ? "Quitting" : KIND_LABEL[g.kind as keyof typeof KIND_LABEL]}>
           {g.items.map((c: Category) => (

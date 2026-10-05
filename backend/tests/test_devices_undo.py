@@ -68,7 +68,7 @@ def test_a_new_rule_refiles_measured_minutes(client, categories):
     client.post("/api/ingest/youtube", json={"heartbeats": _hb("ccccccccccc", "10:00", 5, "Lecture 1", "YaleCourses")},
                 headers=auth)
     entry = next(e for e in client.get("/api/time/entries", params={"start": DAY.isoformat(), "end": DAY.isoformat()}).json())
-    assert entry["category"] is None
+    assert entry["category"]["name"] == "YouTube, not sorted yet"  # strict mode: noise until it is sorted
     client.post("/api/rules", json={"field": "channel", "pattern": "YaleCourses", "category_id": categories["Physics"]["id"]})
     assert client.post("/api/rules/reapply").json()["extension_segments_refiled"] == 1
     entry = next(e for e in client.get("/api/time/entries", params={"start": DAY.isoformat(), "end": DAY.isoformat()}).json())

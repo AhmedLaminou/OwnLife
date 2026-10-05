@@ -1,14 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Clapperboard, FileUp, MonitorPlay, Plus } from "lucide-react";
+import { BookOpen, Check, Clapperboard, FileUp, MonitorPlay, Plus, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Columns, HBars } from "../components/charts";
 import { CategorySelect, useInvalidateLedger } from "../components/domain";
-import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, StatTile, Tabs, useToast } from "../components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, StatTile, Tabs, Toggle, useToast } from "../components/ui";
 import { api, qs } from "../lib/api";
 import { addDays, clock, compactNum, hm, num, shortDate } from "../lib/format";
 import { useTimeZone, useToday } from "../lib/hooks";
 import { KIND_LABEL, chartKinds, kindColor } from "../lib/kinds";
-import type { HistoryImport, Kind, MeasuredToday as MeasuredTodayData, MediaItem, YoutubeStats, YoutubeSummary } from "../lib/types";
+import type { HistoryImport, Kind, MeasuredToday as MeasuredTodayData, MediaItem, SortedVideo, YoutubeSorting, YoutubeStats, YoutubeSummary } from "../lib/types";
 
 const RANGES = [
   { id: "30", label: "30 days" },
@@ -50,6 +50,127 @@ function MeasuredToday() {
           ))}
         </ul>
       </div>
+    </Card>
+  );
+}
+
+function VideoLine({ v }: { v: SortedVideo }) {
+  return (
+    <div className="min-w-0 flex-1">
+      <a href={v.url} target="_blank" rel="noreferrer" className="block truncate text-[13px] text-ink hover:text-accent">{v.title}</a>
+      <p className="truncate text-[12px] text-ink-3">{v.channel ?? "Unknown channel"} · {hm(v.seconds)}</p>
+    </div>
+  );
+}
+
+function SortingCard() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const invalidate = useInvalidateLedger();
+  const [whole, setWhole] = useState<Record<string, boolean>>({});
+  const { data } = useQuery({
+    queryKey: ["youtube-sorting"],
+    queryFn: () => api.get<YoutubeSorting>("/api/media/youtube/sorting"),
+    refetchInterval: (q) => (q.state.data?.status.state === "running" ? 2000 : 60_000),
+  });
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ["youtube-sorting"] });
+    qc.invalidateQueries({ queryKey: ["youtube"] });
+    qc.invalidateQueries({ queryKey: ["measured"] });
+    invalidate();
+  };
+  const prefs = useMutation({
+    mutationFn: (body: Partial<YoutubeSorting["prefs"]>) => api.put<{ refiled: number }>("/api/media/youtube/sorting/prefs", body),
+    onSuccess: refresh,
+  });
+  const run = useMutation({ mutationFn: () => api.post("/api/media/youtube/sorting/run"), onSuccess: refresh });
+  const choose = useMutation({
+    mutationFn: ({ v, category_id }: { v: SortedVideo; category_id: number }) =>
+      api.post(`/api/media/youtube/videos/${v.video_id}/category`, { category_id, whole_channel: !!whole[v.video_id] }),
+    onSuccess: (_, { v }) => {
+      refresh();
+      toast(whole[v.video_id] ? `Every video of ${v.channel} is sorted (a rule)` : "Sorted", "good");
+    },
+  });
+  // A run that was going on when the page opened: refresh the ledger once it ends.
+  const wasRunning = useRef(false);
+  useEffect(() => {
+    if (data?.status.state === "running") wasRunning.current = true;
+    else if (wasRunning.current) {
+      wasRunning.current = false;
+      refresh();
+    }
+  });
+  if (!data) return null;
+  const st = data.status;
+  return (
+    <Card
+      title="Sorting what you watch"
+      subtitle={`Videos no rule places. Your local model (${data.model}) sorts them from their title and channel, on this laptop; what it cannot tell waits for you here.`}
+      action={
+        <Button variant="ghost" icon={<Sparkles size={15} />} onClick={() => run.mutate()} loading={run.isPending || st.state === "running"}
+          disabled={!data.ai || !data.prefs.sort}>
+          Sort now
+        </Button>
+      }
+    >
+      <div className="space-y-2">
+        <div className="flex flex-col items-start gap-2">
+          <Toggle checked={data.prefs.strict} onChange={(v) => prefs.mutate({ strict: v })}
+            label={`Strict: until it is sorted, a video counts as noise (“${data.unsorted_category}”)`} />
+          <Toggle checked={data.prefs.sort} onChange={(v) => prefs.mutate({ sort: v })} label="Let the local model sort new videos" />
+        </div>
+        {!data.ai && <p className="text-[13px] text-warning">AI is off (Settings → AI): nothing sorts the videos but you.</p>}
+        {st.state === "running" && <p className="flex items-center gap-2 text-[13px] text-ink-2"><Spinner /> Sorting…</p>}
+        {st.state === "error" && st.error && <p className="text-[13px] text-warning">The last sorting stopped: {st.error}</p>}
+        {st.state !== "running" && st.asked ? (
+          <p className="text-[12px] text-ink-3">
+            Last sorting: {st.sorted} sorted, {st.guesses} {st.guesses === 1 ? "guess" : "guesses"} of {st.asked} {st.asked === 1 ? "video" : "videos"}.
+          </p>
+        ) : null}
+        <ErrorNote error={prefs.error ?? run.error ?? choose.error} />
+      </div>
+      <div className="mt-4">
+        <p className="mb-1 text-[13px] font-medium text-ink">
+          To sort <span className="text-ink-3">· {data.to_sort.length ? `${data.to_sort.length}, last 14 days` : "nothing waiting"}</span>
+        </p>
+        {data.to_sort.length > 0 && (
+          <ul className="divide-y divide-line">
+            {data.to_sort.map((v) => (
+              <li key={v.video_id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
+                <VideoLine v={v} />
+                {v.category && (
+                  <Button size="sm" variant="ghost" icon={<Check size={14} />} onClick={() => choose.mutate({ v, category_id: v.category!.id })}>
+                    {v.category.name}?
+                  </Button>
+                )}
+                <CategorySelect value={null} noneLabel={v.category ? "Something else…" : "Choose…"} className="h-8 w-48"
+                  onChange={(id) => id && choose.mutate({ v, category_id: id })} />
+                {v.channel && (
+                  <label className="flex items-center gap-1.5 text-[12px] text-ink-3">
+                    <input type="checkbox" checked={!!whole[v.video_id]} onChange={(e) => setWhole({ ...whole, [v.video_id]: e.target.checked })} />
+                    whole channel
+                  </label>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {data.by_model.length > 0 && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-[13px] text-ink-2">Sorted by the model · {data.by_model.length} — correct any</summary>
+          <ul className="mt-1 divide-y divide-line">
+            {data.by_model.map((v) => (
+              <li key={v.video_id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 py-2">
+                <VideoLine v={v} />
+                <CategorySelect value={v.category?.id ?? null} allowNone={false} className="h-8 w-48"
+                  onChange={(id) => id && id !== v.category?.id && choose.mutate({ v, category_id: id })} />
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
     </Card>
   );
 }
@@ -112,6 +233,7 @@ function YouTubeTab() {
   return (
     <div className="space-y-5">
       <MeasuredToday />
+      <SortingCard />
       <Card
         title="YouTube history"
         subtitle="The past, from Google Takeout: YouTube's history (YouTube → history, JSON), or Chrome's (Chrome → History.json, the recent weeks in that browser). Durations are estimated from the gaps between videos."

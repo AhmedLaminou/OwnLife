@@ -328,7 +328,7 @@ function RemindersCard({ prefs }: { prefs: Prefs }) {
   const LABEL = { capture: "Capture the day", bedtime: "Bedtime", morning: "Morning summary" } as const;
   return (
     <Card
-      title="Evening ritual and morning summary"
+      title="Reminders: evening, morning, noise budget"
       subtitle={`Windows notifications from OwnLife, from your bed time (${bed}) and wake time (${wake}) — Settings → Profile`}
       action={<BellRing size={18} className="text-ink-3" />}
     >
@@ -358,6 +358,28 @@ function RemindersCard({ prefs }: { prefs: Prefs }) {
               <option value={240}>4 hours</option>
             </Select>
             <span className="text-ink-3">(then twice, three times as long)</span>
+          </div>
+          <div className="space-y-2">
+            <Toggle checked={f.noise_alert} onChange={(v) => setF({ ...f, noise_alert: v })}
+              label={`When the day's noise reaches its budget (${profile?.noise_budget_hours ?? 1} h — Settings → Profile)`} />
+            <div className={clsx("flex flex-wrap items-center gap-2 pl-14 text-[13px]", !f.noise_alert && "pointer-events-none opacity-50")}>
+              <span className="text-ink-2">Warn</span>
+              <Select value={f.noise_warn_minutes} onChange={(e) => setF({ ...f, noise_warn_minutes: Number(e.target.value) })} className="!w-auto"
+                aria-label="Warning before the noise budget is spent">
+                <option value={0}>only when it is spent</option>
+                <option value={10}>10 min before</option>
+                <option value={15}>15 min before</option>
+                <option value={30}>30 min before</option>
+              </Select>
+              <span className="text-ink-2">then, past it,</span>
+              <Select value={f.noise_repeat_minutes} onChange={(e) => setF({ ...f, noise_repeat_minutes: Number(e.target.value) })} className="!w-auto"
+                aria-label="Reminders past the noise budget">
+                <option value={0}>not again</option>
+                <option value={10}>every 10 min</option>
+                <option value={15}>every 15 min</option>
+                <option value={30}>every 30 min</option>
+              </Select>
+            </div>
           </div>
         </div>
         <p className="text-[12px] leading-relaxed text-ink-3">

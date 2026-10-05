@@ -213,7 +213,8 @@ def reapply_rules(user: CurrentUser, db: DB) -> dict:
     last = db.scalar(select(func.max(WatchEvent.occurred_at)).where(WatchEvent.user_id == user.id, history))
     if first and last:
         rebuilt = rebuild_sessions(db, user.id, rules, first, last)
-    measured = watchlive.rebuild(db, user.id, rules)
-    db.commit()
+    with watchlive.LOCK:
+        measured = watchlive.rebuild(db, user.id, rules)
+        db.commit()
     return {"activitywatch_reclassified": changed, "window_blocks_reclassified": windows,
             "youtube_blocks_rebuilt": rebuilt, "extension_segments_refiled": measured}

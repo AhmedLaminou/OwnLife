@@ -38,6 +38,9 @@ class ReminderPrefs(BaseModel):
     morning: bool = True
     auto_review: bool = True
     timer_nudge_minutes: int = Field(120, ge=0, le=720)
+    noise_alert: bool = True
+    noise_warn_minutes: int = Field(15, ge=0, le=120)
+    noise_repeat_minutes: int = Field(15, ge=0, le=240)
 
 
 def _section(profile, name: str) -> dict:

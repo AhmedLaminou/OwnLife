@@ -96,6 +96,43 @@ body {
   color: var(--ink-3);
 }
 
+.noise-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.big.near {
+  color: var(--amber);
+}
+
+.big.over {
+  color: var(--critical);
+}
+
+.bar {
+  height: 6px;
+  margin: 6px 0 8px;
+  border-radius: 3px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--ink-3);
+}
+
+.bar span.near {
+  background: var(--amber);
+}
+
+.bar span.over {
+  background: var(--critical);
+}
+
 .row {
   display: flex;
   justify-content: space-between;

@@ -76,19 +76,22 @@ def chat_models(
             more = f" (+{len(models) - 1} fallback{'s' if len(models) > 2 else ''})" if len(models) > 1 else ""
             out.append(ModelChoice("openrouter", models[0], f"OpenRouter · {models[0]}{more}", True, llm))
     if mode in ("local", "cloud_then_local"):
-        llm = ChatOpenAI(
-            model=settings.ollama_chat_model,
-            api_key="ollama",  # Ollama ignores it; the client requires one
-            base_url=settings.ollama_base_url.rstrip("/") + "/v1",
-            temperature=temperature,
-            timeout=settings.local_llm_timeout_seconds,
-            max_retries=0,
-            use_responses_api=False,
-        )
-        out.append(
-            ModelChoice("ollama", settings.ollama_chat_model, f"Ollama · {settings.ollama_chat_model}", False, llm)
-        )
+        out.append(local_model(settings, temperature=temperature))
     return out
+
+
+def local_model(settings: Settings, *, temperature: float = 0.3) -> ModelChoice:
+    """The Ollama model on this machine, whatever the AI mode says."""
+    llm = ChatOpenAI(
+        model=settings.ollama_chat_model,
+        api_key="ollama",  # Ollama ignores it; the client requires one
+        base_url=settings.ollama_base_url.rstrip("/") + "/v1",
+        temperature=temperature,
+        timeout=settings.local_llm_timeout_seconds,
+        max_retries=0,
+        use_responses_api=False,
+    )
+    return ModelChoice("ollama", settings.ollama_chat_model, f"Ollama · {settings.ollama_chat_model}", False, llm)
 
 
 def compose(choices: list[ModelChoice], wrap: Callable[[BaseChatModel], Runnable]) -> Runnable:

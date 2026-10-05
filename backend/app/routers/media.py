@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from typing import Literal
 
@@ -12,8 +13,10 @@ from sqlalchemy import func, select
 from app.config import get_settings
 from app.db import utcnow
 from app.deps import DB, CurrentProfile, CurrentUser
-from app.models import Category, MediaItem, WatchEvent
+from app.ai.llm import effective_mode
+from app.models import Category, ClassificationRule, MediaItem, WatchEvent
 from app.serializers import category_out, iso, media_out
+from app.services import videosort, watchlive
 from app.services.rules import Activity, load_ruleset
 from app.services.timeutil import local_today, range_utc, tz_of
 from app.services.youtube import (
@@ -249,3 +252,96 @@ def youtube_stats(user: CurrentUser, db: DB) -> dict:
     last = db.scalar(select(func.max(WatchEvent.occurred_at)).where(WatchEvent.user_id == user.id))
     return {"events": total, "first": iso(first), "last": iso(last), "now": iso(utcnow()),
             "channel_lookup": lookup_status(user.id)}
+
+
+# ---------------------------------------------------------------- sorting the videos the extension measured
+class SortPrefsIn(BaseModel):
+    strict: bool | None = None
+    sort: bool | None = None
+
+
+class VideoCategoryIn(BaseModel):
+    category_id: int
+    whole_channel: bool = False  # a rule for the channel instead of this video alone
+
+
+def _video_row(v: videosort.Video, cat: Category | None = None) -> dict:
+    return {"video_id": v.video_id, "title": v.title, "channel": v.channel, "seconds": round(v.seconds),
+            "last": iso(v.last), "url": f"https://www.youtube.com/watch?v={v.video_id}",
+            "category": category_out(cat) if cat else None}
+
+
+@router.get("/youtube/sorting")
+def youtube_sorting(user: CurrentUser, profile: CurrentProfile, db: DB, days: int = Query(14, ge=1, le=90)) -> dict:
+    """The videos of the last days that nothing places (with the model's guess,
+    when it had one), and those the model sorted — to confirm or correct."""
+    rules = load_ruleset(db, user.id)
+    seen = videosort.verdicts(db, user.id)
+    cats = {c.id: c for c in db.scalars(select(Category).where(Category.user_id == user.id))}
+    to_sort, by_model = [], []
+    for v in sorted(videosort.watched_videos(db, user.id, utcnow() - timedelta(days=days)).values(),
+                    key=lambda v: v.last or utcnow(), reverse=True):
+        act = Activity(title=v.title, channel=v.channel, url=f"https://www.youtube.com/watch?v={v.video_id}")
+        if v.video_id in rules.yours or rules.by_rules(act) is not None:
+            continue
+        verdict = seen.get(v.video_id)
+        if v.video_id in rules.model:
+            by_model.append(_video_row(v, cats.get(rules.model[v.video_id])))
+        else:
+            guess = cats.get(verdict.category_id) if verdict is not None and verdict.sorted_by == "guess" else None
+            to_sort.append({**_video_row(v, guess), "asked": verdict is not None})
+    prefs = watchlive.settings_with_defaults((profile.prefs or {}).get("youtube"))
+    return {"prefs": {"strict": prefs["strict"], "sort": prefs["sort"]},
+            "ai": effective_mode(get_settings(), profile) != "off",
+            "model": get_settings().ollama_chat_model, "status": videosort.status(user.id),
+            "unsorted_category": watchlive.UNSORTED, "to_sort": to_sort, "by_model": by_model}
+
+
+@router.put("/youtube/sorting/prefs")
+def youtube_sorting_prefs(body: SortPrefsIn, user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    old = watchlive.settings_with_defaults((profile.prefs or {}).get("youtube"))
+    new = {**old, **body.model_dump(exclude_none=True)}
+    profile.prefs = {**(profile.prefs or {}), "youtube": new}
+    db.commit()
+    refiled = 0
+    if new["strict"] != old["strict"]:  # the videos nothing sorted change category
+        with watchlive.LOCK:
+            refiled = watchlive.rebuild(db, user.id, load_ruleset(db, user.id))
+            db.commit()
+    if new["sort"] and not old["sort"]:
+        videosort.schedule(get_settings(), user.id, force=True)
+    return {"prefs": {"strict": new["strict"], "sort": new["sort"]}, "refiled": refiled}
+
+
+@router.post("/youtube/sorting/run")
+def youtube_sorting_run(user: CurrentUser, profile: CurrentProfile) -> dict:
+    if effective_mode(get_settings(), profile) == "off":
+        raise HTTPException(400, "AI is off (Settings → AI): there is no model to sort the videos.")
+    return {"running": videosort.schedule(get_settings(), user.id, force=True)}
+
+
+@router.post("/youtube/videos/{video_id}/category")
+def set_video_category(video_id: str, body: VideoCategoryIn, user: CurrentUser, db: DB) -> dict:
+    """You sort a video: this one alone (it then wins over every rule), or its
+    whole channel (a rule, which also applies to the history and to new videos)."""
+    cat = db.get(Category, body.category_id)
+    if cat is None or cat.user_id != user.id:
+        raise HTTPException(404, "Category not found")
+    v = videosort.watched_videos(db, user.id, utcnow() - timedelta(days=3650)).get(video_id)
+    if v is None:
+        raise HTTPException(404, "The extension has not measured this video")
+    videos = {video_id}
+    if body.whole_channel:
+        if not v.channel:
+            raise HTTPException(400, "This video's channel is unknown: sort the video alone")
+        db.add(ClassificationRule(user_id=user.id, field="channel", pattern=f"^{re.escape(v.channel)}$", is_regex=True,
+                                  category_id=cat.id, note="From the Watching page"))
+        videos |= set(db.scalars(select(WatchEvent.video_id).where(
+            WatchEvent.user_id == user.id, WatchEvent.source == watchlive.SOURCE, WatchEvent.channel == v.channel)))
+        item = videosort.verdicts(db, user.id).get(video_id)
+        if item is not None and item.sorted_by == "you":  # the rule now speaks for the whole channel
+            item.sorted_by = None
+    else:
+        videosort.remember(db, user.id, v, cat.id, "you")
+    db.commit()
+    return {"ok": True, "refiled": videosort.refile(db, user.id, videos, unsorted_too=False)}

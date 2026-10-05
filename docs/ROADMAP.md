@@ -60,6 +60,17 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
 - **A built-in window tracker**: the program and window in front, every 5 s while
   the keyboard or mouse is used; ActivityWatch no longer needed. 121 backend tests.
 
+**v0.2.4 (2026-10-05)** — the noise budget, live:
+
+- **A notification as the budget runs out**: 15 minutes before, when it is
+  spent, every 15 minutes past it; the extension's icon shows the day's noise.
+- **Strict mode**: YouTube that nothing sorted counts as noise.
+- **The local model sorts new videos** (title and channel, on this laptop); what
+  it cannot tell waits on the Watching page, one click to confirm; a whole channel
+  in one click. Videos that arrived without their channel get it back.
+- Smart App Control started blocking `jiter`, which broke every AI feature: a
+  pure-Python stand-in takes its place.
+
 ## Next, in the order that matters most
 
 1. **Go live** — apply the seed, run `scripts\autostart.ps1`, set
@@ -68,14 +79,18 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
    ([GOING_LIVE.md](GOING_LIVE.md)).
 2. **Browser tabs by address** — the window tracker knows a tab only by its
    title; the OwnLife extension can report the active tab's site, so domain rules
-   classify browsing as they classify YouTube.
-3. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
+   classify browsing as they classify YouTube (and news sites count against the
+   noise budget as surely as news videos).
+3. **A screen over noise once the budget is spent** — optional: the extension
+   covers a noise video with "your hour is spent", one button for ten more
+   minutes; learning videos never blocked.
+4. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
    Gemini prompts, Chrome pages, searches. Searchable by the assistant
    (`search_activity`), shown under each day, private by default for cloud models.
    Waiting on a decision: which of those OwnLife should hold at all.
-4. **Weekly and monthly reviews** — the daily reviews, aggregated: trend of core
+5. **Weekly and monthly reviews** — the daily reviews, aggregated: trend of core
    hours, noise, sleep regularity, adherence, the relapse-hour chart.
-5. **Encryption at rest** — SQLCipher, or at least BitLocker on the drive: the
+6. **Encryption at rest** — SQLCipher, or at least BitLocker on the drive: the
    database holds the journal in clear.
 
 ## Later

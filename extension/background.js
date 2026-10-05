@@ -80,9 +80,55 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   return false;
 });
 
+// When nothing was sent for a minute, ask OwnLife for today's numbers anyway:
+// the noise of the day also grows outside YouTube (the window tracker, your entries).
+async function refresh() {
+  const { server, token } = await config();
+  if (!token) return;
+  const { lastSync } = await chrome.storage.local.get("lastSync");
+  if (lastSync && Date.now() - Date.parse(lastSync) < 50000) return;
+  try {
+    const r = await fetch(`${server}/api/ingest/ping`, { headers: { Authorization: `Bearer ${token}`, "X-OwnLife": "1" } });
+    if (!r.ok) return;
+    const data = await r.json();
+    await chrome.storage.local.set({ status: "ok", lastError: null, lastSync: new Date().toISOString(), today: data.today });
+  } catch {
+    // OwnLife is not running: the badge keeps its last number (until the day ends)
+  }
+}
+
+function hm(m) {
+  return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
+}
+
+// The icon's badge: today's noise in minutes — grey, amber when the budget is
+// nearly spent, red once it is.
+async function badge() {
+  const { today, lastSync } = await chrome.storage.local.get(["today", "lastSync"]);
+  const noise = today && today.noise;
+  const fresh = lastSync && new Date(lastSync).toDateString() === new Date().toDateString();
+  const minutes = noise && fresh ? Math.round(noise.seconds / 60) : 0;
+  if (!minutes) {
+    await chrome.action.setBadgeText({ text: "" });
+    await chrome.action.setTitle({ title: "OwnLife — YouTube time" });
+    return;
+  }
+  const budget = noise.budget_seconds || 0;
+  const color = noise.seconds >= budget ? "#dc2626" : noise.seconds >= budget - (noise.warn_seconds || 0) ? "#d97706" : "#475569";
+  await chrome.action.setBadgeText({ text: hm(minutes) });
+  await chrome.action.setBadgeBackgroundColor({ color });
+  if (chrome.action.setBadgeTextColor) await chrome.action.setBadgeTextColor({ color: "#ffffff" });
+  await chrome.action.setTitle({ title: `OwnLife — noise today: ${hm(minutes)} of ${hm(Math.round(budget / 60))}` });
+}
+
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.today || changes.lastSync) badge();
+});
+badge();
+
 chrome.alarms.create("flush", { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === "flush") flush();
+  if (alarm.name === "flush") flush().then(refresh).then(badge);
 });
 
 chrome.runtime.onInstalled.addListener((details) => {

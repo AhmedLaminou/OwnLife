@@ -12,17 +12,24 @@ ledger blocks, classified by the same rules as the YouTube history:
 Unlike Google Takeout (a moment per video, durations guessed from the gaps),
 these are real minutes, pauses excluded. In the ledger they outrank
 ActivityWatch's browser time, so the same minutes never count twice.
+
+Strict mode (on unless you turn it off): a video that no rule and no sorting
+places counts as noise — it lands in "YouTube, not sorted yet", a noise
+category, until it is sorted (services/videosort.py). Such a block still yields
+to a running timer, like a video without a category: a lecture from a channel
+nobody sorted yet must not erase study time.
 """
 
 from __future__ import annotations
 
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from app.models import TimeEntry, WatchEvent
+from app.models import Category, Profile, TimeEntry, WatchEvent
 from app.services.rules import Activity, RuleSet
 from app.services.youtube import channel_for_video
 
@@ -31,6 +38,31 @@ PULSE = timedelta(seconds=45)  # a heartbeat this close to a segment's end exten
 MERGE_GAP = timedelta(minutes=3)  # segments of one category this close form one block
 MIN_BLOCK = timedelta(seconds=20)  # shorter than this stays out of the ledger
 VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{6,20}$")
+UNSORTED = "YouTube, not sorted yet"
+DEFAULTS = {"strict": True, "sort": True}
+
+# Everything that rewrites the extension's blocks takes this lock: an upload
+# from the extension and a re-filing after a sorting must not interleave.
+LOCK = threading.Lock()
+
+
+def settings_with_defaults(prefs: dict | None) -> dict:
+    return {**DEFAULTS, **(prefs or {})}
+
+
+def strict_category(db: Session, user_id: int) -> int | None:
+    """The noise category of the videos nothing sorted, when strict mode is on
+    (created the first time it is needed)."""
+    profile = db.get(Profile, user_id)
+    if profile is None or not settings_with_defaults((profile.prefs or {}).get("youtube"))["strict"]:
+        return None
+    cat = db.scalar(select(Category).where(Category.user_id == user_id, Category.name == UNSORTED)
+                    .order_by(Category.id).limit(1))
+    if cat is None:
+        cat = Category(user_id=user_id, name=UNSORTED, kind="noise", icon="circle-help", sort=900)
+        db.add(cat)
+        db.flush()
+    return cat.id
 
 
 def _ts(value: str) -> datetime:
@@ -73,24 +105,31 @@ def _refresh(db: Session, entry: TimeEntry) -> None:
         videos[x.video_id] = x.title
     entry.started_at = min(x.occurred_at for x in segs)
     entry.ended_at = max(x.ended_at for x in segs)
-    entry.meta = {"segments": sorted(x.id for x in segs), "channels": channels, "videos": videos}
+    unsorted = {"unsorted": True} if (entry.meta or {}).get("unsorted") else {}
+    entry.meta = {"segments": sorted(x.id for x in segs), "channels": channels, "videos": videos, **unsorted}
     entry.title = _title(channels, len(videos))[:300]
 
 
-def attach(db: Session, user_id: int, seg: WatchEvent, ruleset: RuleSet) -> TimeEntry | None:
+def attach(db: Session, user_id: int, seg: WatchEvent, ruleset: RuleSet,
+           fallback: int | None = None) -> TimeEntry | None:
     """Puts a segment into the ledger: into the block that already holds it,
     else a block of the same category less than 3 minutes away (before or
-    after), else a new block. Blocks that end up touching are merged."""
+    after), else a new block. Blocks that end up touching are merged.
+    `fallback`: the category of what nothing sorted (strict mode)."""
     if seg.ended_at - seg.occurred_at < MIN_BLOCK:
         return None
     cat = ruleset.classify(Activity(title=seg.title, channel=seg.channel, url=seg.url))
+    unsorted = cat is None and fallback is not None
+    if unsorted:
+        cat = fallback
     near = _entries_near(db, user_id, seg.occurred_at, seg.ended_at)
     entry = next((e for e in near if seg.id in _segments_of(e)), None)
     if entry is None:
         entry = next((e for e in near if e.category_id == cat), None)
     if entry is None:
         entry = TimeEntry(user_id=user_id, title="YouTube", category_id=cat, started_at=seg.occurred_at,
-                          ended_at=seg.ended_at, source=SOURCE, source_ref=f"ext:{seg.id}", meta={"segments": []})
+                          ended_at=seg.ended_at, source=SOURCE, source_ref=f"ext:{seg.id}",
+                          meta={"segments": [], **({"unsorted": True} if unsorted else {})})
         db.add(entry)
     if seg.id not in _segments_of(entry):
         entry.meta = {**(entry.meta or {}), "segments": [*_segments_of(entry), seg.id]}
@@ -122,6 +161,7 @@ def ingest(db: Session, user_id: int, heartbeats: list[dict], ruleset: RuleSet, 
     (the extension keeps them while OwnLife is off): heartbeats are grouped into
     runs per video, and every stored segment a run touches is merged into one."""
     now = now or datetime.now(timezone.utc)
+    fallback = strict_category(db, user_id)
     by_video: dict[str, list[tuple[datetime, dict]]] = {}
     used = 0
     for hb in heartbeats:
@@ -162,7 +202,7 @@ def ingest(db: Session, user_id: int, heartbeats: list[dict], ruleset: RuleSet, 
             if not seg.channel:
                 seg.channel = info.get("channel") or channel_for_video(db, user_id, vid, enabled=oembed)
             db.flush()
-            attach(db, user_id, seg, ruleset)
+            attach(db, user_id, seg, ruleset, fallback)
     db.flush()
     return {"accepted": used, "ignored": len(heartbeats) - used}
 
@@ -170,6 +210,7 @@ def ingest(db: Session, user_id: int, heartbeats: list[dict], ruleset: RuleSet, 
 def rebuild(db: Session, user_id: int, ruleset: RuleSet, since: datetime | None = None) -> int:
     """Re-files every measured segment after a rule changed (entries whose
     category you set by hand are kept as they are)."""
+    fallback = strict_category(db, user_id)
     q = delete(TimeEntry).where(TimeEntry.user_id == user_id, TimeEntry.source == SOURCE,
                                 TimeEntry.category_locked.is_(False))
     if since is not None:
@@ -183,7 +224,7 @@ def rebuild(db: Session, user_id: int, ruleset: RuleSet, since: datetime | None 
         segs = segs.where(WatchEvent.occurred_at >= since)
     n = 0
     for seg in db.scalars(segs.order_by(WatchEvent.occurred_at)):
-        if seg.id not in locked and attach(db, user_id, seg, ruleset) is not None:
+        if seg.id not in locked and attach(db, user_id, seg, ruleset, fallback) is not None:
             n += 1
     return n
 

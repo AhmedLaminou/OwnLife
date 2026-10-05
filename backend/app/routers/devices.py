@@ -20,7 +20,8 @@ from app.deps import DB, CurrentProfile, CurrentUser
 from app.models import ApiToken, Profile, User, WatchEvent
 from app.security import hash_token
 from app.serializers import iso
-from app.services import watchlive
+from app.services import reminders, videosort, watchlive
+from app.services.reminders import noise_today
 from app.services.rules import load_ruleset
 from app.services.timeutil import local_today, range_utc, tz_of
 
@@ -103,10 +104,14 @@ YoutubeUser = Annotated[User, Depends(token_user("youtube"))]
 
 
 def _today(db, user_id: int) -> dict:
+    """What the extension shows: today's YouTube by channel, and today's noise
+    (from every source) against the budget, for the badge on its icon."""
     profile = db.get(Profile, user_id)
     tz = tz_of(profile.timezone)
     lo, hi = range_utc(local_today(tz), local_today(tz), tz)
-    return watchlive.today_summary(db, user_id, lo, hi)
+    warn = int(reminders.settings_with_defaults((profile.prefs or {}).get("reminders"))["noise_warn_minutes"] or 0)
+    return {**watchlive.today_summary(db, user_id, lo, hi),
+            "noise": {**noise_today(db, user_id, profile, utcnow()), "warn_seconds": warn * 60}}
 
 
 @router.get("/ingest/ping")
@@ -120,9 +125,12 @@ async def ingest_youtube(body: IngestIn, user: YoutubeUser) -> dict:
     beats = [h.model_dump() for h in body.heartbeats]
 
     def work() -> dict:
+        settings = get_settings()
         with SessionLocal() as db:
-            result = watchlive.ingest(db, uid, beats, load_ruleset(db, uid), oembed=get_settings().youtube_oembed)
-            db.commit()
+            with watchlive.LOCK:
+                result = watchlive.ingest(db, uid, beats, load_ruleset(db, uid), oembed=settings.youtube_oembed)
+                db.commit()
+            videosort.schedule(settings, uid)  # videos no rule places: the local model sorts them
             return {**result, "today": _today(db, uid)}
 
     return await run_in_threadpool(work)
