@@ -149,10 +149,10 @@ def test_a_long_running_timer_asks_if_you_are_still_on_it(client, categories):
 # ---------------------------------------------------------------- life events
 def test_life_events_crud_and_overview(client):
     e = client.post("/api/life/events", json={"date": "2022-09-15", "precision": "month", "area": "move",
-                                               "title": "Started CS in Monastir", "importance": 3}).json()
+                                               "title": "Started CS in Exampleton", "importance": 3}).json()
     assert e["precision"] == "month"
-    client.patch(f"/api/life/events/{e['id']}", json={"title": "Started Computer Science — Monastir"})
+    client.patch(f"/api/life/events/{e['id']}", json={"title": "Started Computer Science — Exampleton"})
     overview = client.get("/api/life/overview").json()
-    assert [x["title"] for x in overview["events"]] == ["Started Computer Science — Monastir"]
+    assert [x["title"] for x in overview["events"]] == ["Started Computer Science — Exampleton"]
     assert client.delete(f"/api/life/events/{e['id']}").json() == {"ok": True}
     assert client.get("/api/life/events").json() == []
