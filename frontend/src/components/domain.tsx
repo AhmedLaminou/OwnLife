@@ -408,6 +408,7 @@ export function CaptureReview({ draft, onDone, allowJournal = true }: { draft: C
       toast(parts.length ? `Saved: ${parts.join(", ")} — undo it from Assistant → Inbox` : "Nothing selected", "good");
       if (r.journal_sync?.state === "conflict") toast(r.journal_sync.message ?? "Journal: a conflict to resolve", "critical");
       if (r.errors.length) toast(r.errors.join(" · "), "critical");
+      (r.warnings ?? []).forEach((w) => toast(w));
       onDone();
     },
   });
@@ -472,8 +473,30 @@ export function CaptureReview({ draft, onDone, allowJournal = true }: { draft: C
                   {t.direction === "in" ? "+" : "−"}
                   {t.amount}
                 </span>
-                <span className="flex-1 text-ink-2">{t.item}</span>
+                <span className="flex-1 text-ink-2">
+                  {t.item}
+                  {t.person ? <span className="text-ink-3"> · {t.direction === "in" ? "from" : "to"} {t.person}</span> : t.counterparty ? <span className="text-ink-3"> · {t.counterparty}</span> : null}
+                </span>
                 <Badge>{t.category}</Badge>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {(body.moments ?? []).length > 0 && (
+        <section>
+          <h3 className="mb-2 text-[12px] font-medium uppercase tracking-wider text-ink-3">For their page in People</h3>
+          <div className="space-y-2">
+            {(body.moments ?? []).map((m, i) => (
+              <label key={i} className={clsx("flex items-start gap-3 rounded-xl border border-line px-3 py-2 text-sm", !m.include && "opacity-45")}>
+                <input type="checkbox" checked={m.include} onChange={(e) => set("moments", i, { include: e.target.checked })} className="mt-0.5 h-4 w-4 accent-[var(--accent)]" />
+                <span className="w-32 shrink-0 font-medium text-ink">{m.person}</span>
+                <span className="flex-1 text-ink-2">
+                  <span className="text-ink-3">{m.kind === "gift_from" ? "gave you: " : m.kind === "gift_to" ? "you gave: " : ""}</span>
+                  {m.text}
+                  {m.day_offset === -1 && <span className="text-ink-3"> (the day before)</span>}
+                </span>
               </label>
             ))}
           </div>

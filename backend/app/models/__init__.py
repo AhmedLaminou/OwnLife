@@ -18,10 +18,11 @@ from app.models.ledger import (
     Category,
     ClassificationRule,
     Person,
+    PersonMoment,
     TimeEntry,
     time_entry_people,
 )
-from app.models.memory import Chunk, JournalEntry, Note
+from app.models.memory import Chunk, Idea, JournalEntry, Note
 
 __all__ = [
     "CATEGORY_KINDS",
@@ -37,6 +38,7 @@ __all__ = [
     "Goal",
     "Habit",
     "HabitLog",
+    "Idea",
     "IntegrationState",
     "JournalEntry",
     "LifeChapter",
@@ -45,6 +47,7 @@ __all__ = [
     "MoneySuggestion",
     "Note",
     "Person",
+    "PersonMoment",
     "PlanBlock",
     "PlanTemplate",
     "Profile",

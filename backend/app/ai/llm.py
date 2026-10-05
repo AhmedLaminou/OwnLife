@@ -107,6 +107,12 @@ def compose(choices: list[ModelChoice], wrap: Callable[[BaseChatModel], Runnable
     return primary.with_fallbacks(rest) if rest else primary
 
 
+def compose_each(choices: list[ModelChoice], wrap: Callable[[ModelChoice], Runnable]) -> Runnable:
+    """Like compose, but `wrap` sees which model it wraps — a small local model
+    gets fewer tools than a large cloud one."""
+    return compose(choices, lambda llm: wrap(next(c for c in choices if c.llm is llm)))
+
+
 def any_cloud(choices: list[ModelChoice]) -> bool:
     return any(c.is_cloud for c in choices)
 

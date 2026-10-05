@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.config import get_settings
 from app.db import SessionLocal
-from app.models import TimeEntry
+from app.models import TimeEntry, WatchEvent
 from app.services import reminders, videosort
 from app.services.watchlive import UNSORTED
 
@@ -211,3 +211,27 @@ def test_the_extension_gets_todays_noise_for_its_badge(client, categories):
     noise = _send(client, beats)["today"]["noise"]
     assert noise["budget_seconds"] == 3600 and 100 <= noise["seconds"] <= 140
     assert noise["categories"][0]["name"] == "Reaction videos"
+
+
+def test_the_history_is_sorted_on_demand_and_its_blocks_rebuilt(client, categories):
+    uid = _uid(client)
+    past = [("hhhhhhhhhh1", "Eigenvalues, lecture 7", "SomeMathChannel"), ("hhhhhhhhhh2", "Election night, live", "NightlyNewsTV")]
+    with SessionLocal() as db:
+        for i, (vid, title, channel) in enumerate(past):
+            db.add(WatchEvent(user_id=uid, source="chrome_history", video_id=vid, title=title, channel=channel,
+                              occurred_at=_at(f"0{8 + 2 * i}:00"), url=f"https://www.youtube.com/watch?v={vid}"))
+        db.commit()
+    client.post("/api/rules/reapply")  # the estimated blocks, without a category yet
+    assert client.get("/api/media/youtube/sorting").json()["history_unsorted"] == 2
+
+    def fake(cats, videos):
+        by_name = {c.name: c.id for c in cats}
+        return [(v.video_id, by_name["Mathematics" if "Eigen" in v.title else "News & geopolitics"], True) for v in videos]
+
+    res = videosort.sort(get_settings(), uid, asker=fake, label="fake", history=True)
+    assert (res.asked, res.sorted) == (2, 2) and res.refiled == 2
+    with SessionLocal() as db:
+        cats = sorted(e.category.name for e in db.query(TimeEntry).filter(TimeEntry.source == "youtube_takeout"))
+    assert cats == ["Mathematics", "News & geopolitics"]
+    assert client.get("/api/media/youtube/sorting").json()["history_unsorted"] == 0
+

@@ -14,9 +14,10 @@ from sqlalchemy import select
 from app.ai.llm import effective_mode
 from app.config import get_settings
 from app.deps import DB, CurrentProfile, CurrentUser
-from app.models import MoneySuggestion, Transaction
+from app.models import MoneySuggestion, Person, Transaction
 from app.serializers import iso, money_suggestion_out, tx_out
 from app.services import journal_money, records
+from app.services import people as people_service
 from app.services.activitywatch import get_state
 from app.services.records import from_minor, to_minor
 from app.services.timeutil import local_today, tz_of
@@ -31,6 +32,8 @@ class TxIn(BaseModel):
     item: str = Field(min_length=1, max_length=200)
     category: str = Field("other", max_length=60)
     counterparty: str | None = Field(None, max_length=120)
+    # someone you know who gave or received it: linked, or added to People
+    person: str | None = Field(None, max_length=120)
     note: str | None = None
 
 
@@ -42,6 +45,8 @@ class TxPatch(BaseModel):
     category: str | None = Field(None, max_length=60)
     counterparty: str | None = Field(None, max_length=120)
     note: str | None = None
+    person_id: int | None = None  # link to this person; null unlinks
+    person: str | None = Field(None, max_length=120)  # or by name (added to People when new)
 
 
 class JournalPrefs(BaseModel):
@@ -83,29 +88,50 @@ def list_tx(user: CurrentUser, profile: CurrentProfile, db: DB, start: date | No
 
 @router.post("")
 def create_tx(body: TxIn, user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    warnings: list[str] = []
     try:
         t = records.create_transaction(
             db, user.id, profile.currency, occurred_on=body.date, direction=body.direction, amount=body.amount,
             item=body.item, category=body.category, counterparty=body.counterparty, note=body.note,
+            person=body.person, warnings=warnings,
         )
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     db.commit()
-    return tx_out(t)
+    return {**tx_out(t), "warnings": warnings}
 
 
 @router.patch("/{tx_id}")
 def update_tx(tx_id: int, body: TxPatch, user: CurrentUser, db: DB) -> dict:
     t = _own(db, user.id, tx_id)
     data = body.model_dump(exclude_unset=True)
+    warnings: list[str] = []
     if "amount" in data:
         t.amount_minor = to_minor(data.pop("amount"), t.currency)
     if "date" in data:
         t.occurred_on = data.pop("date")
+    if "person_id" in data:
+        pid = data.pop("person_id")
+        if pid is not None:
+            p = db.get(Person, pid)
+            if p is None or p.user_id != user.id:
+                raise HTTPException(404, "Person not found")
+        t.person_id = pid
+    if "person" in data:
+        name = (data.pop("person") or "").strip()
+        if not name:
+            t.person_id = None
+        else:
+            found = people_service.link(db, user.id, name)
+            if found.warning:
+                warnings.append(found.warning)
+            t.person_id = found.person.id if found.person else t.person_id
+            t.counterparty = t.counterparty or name
     for k, v in data.items():
         setattr(t, k, v)
     db.commit()
-    return tx_out(t)
+    db.refresh(t)
+    return {**tx_out(t), "warnings": warnings}
 
 
 @router.delete("/{tx_id}")

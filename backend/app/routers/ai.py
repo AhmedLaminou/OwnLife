@@ -18,10 +18,10 @@ from app.ai import rag
 from app.ai.agent import build_graph, message_to_row, rows_to_messages, sse, stream_turn, text_of
 from app.ai.capture import CommitDraft, commit, extract, normalize
 from app.ai.embeddings import get_embedder
-from app.ai.llm import AIUnavailableError, chat_models, compose, describe_error, effective_mode
+from app.ai.llm import AIUnavailableError, chat_models, compose_each, describe_error, effective_mode
 from app.ai.prompts import chat_system_prompt
 from app.ai.review import day_facts, facts_text, write_review
-from app.ai.tools import ToolContext, build_tools, known_people, today_summary
+from app.ai.tools import LOCAL_TOOLS, ToolContext, build_tools, known_people, today_summary
 from app.config import get_settings
 from app.db import SessionLocal, utcnow
 from app.deps import DB, CurrentProfile, CurrentUser
@@ -308,7 +308,8 @@ async def chat(body: ChatIn, user: CurrentUser) -> StreamingResponse:
     ctx = ToolContext(uid, embedder, for_cloud)
     tools = build_tools(ctx)
     try:
-        llm = compose(choices, lambda m: m.bind_tools(tools))
+        local_tools = [t for t in tools if t.name in LOCAL_TOOLS]
+        llm = compose_each(choices, lambda c: c.llm.bind_tools(tools if c.is_cloud else local_tools))
     except AIUnavailableError as e:
         return StreamingResponse(_error_stream(str(e), thread_id), media_type="text/event-stream")
 

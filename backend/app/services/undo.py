@@ -7,13 +7,14 @@ record has been changed by hand since — it never removes your own edits.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.ai import rag
 from app.models import (
+    ClassificationRule,
     Goal,
     Habit,
     HabitLog,
@@ -21,12 +22,13 @@ from app.models import (
     LifeEvent,
     MediaItem,
     Person,
+    PersonMoment,
     PlanBlock,
     TimeEntry,
     Transaction,
-    time_entry_people,
 )
 from app.services import filesync
+from app.services import people as people_service
 from app.services.mdfile import clean_day_body
 from app.services.records import running_timer
 
@@ -66,6 +68,39 @@ def undo_journal_append(db: Session, user_id: int, cfg, info: dict) -> str:
     if result["state"] == "conflict":
         return "Removed in OwnLife; your file changed meanwhile — resolve it in the Journal."
     return "The text was removed from the page."
+
+
+def _drop_new_people(db: Session, user_id: int, ids: list[int] | None) -> int:
+    """People an action created, removed again if nothing else points at them."""
+    db.flush()
+    n = 0
+    for pid in ids or []:
+        p = _own(db, Person, pid, user_id)
+        if p is not None and not people_service.in_use(db, pid):
+            db.delete(p)
+            n += 1
+    return n
+
+
+_TX_FIELDS = ("occurred_on", "direction", "amount_minor", "currency", "item", "category", "counterparty",
+              "person_id", "note", "source")
+
+
+def tx_snapshot(t: Transaction) -> dict:
+    """What undo needs to restore a transaction as it was."""
+    return {k: (getattr(t, k).isoformat() if isinstance(getattr(t, k), date) else getattr(t, k)) for k in _TX_FIELDS}
+
+
+def _restore_tx(t: Transaction, snap: dict) -> None:
+    for k, v in snap.items():
+        setattr(t, k, date.fromisoformat(v) if k == "occurred_on" and v else v)
+
+
+_MEDIA_FIELDS = ("kind", "title", "creator", "status", "progress_current", "progress_total", "progress_unit")
+
+
+def media_snapshot(m: MediaItem) -> dict:
+    return {k: getattr(m, k) for k in _MEDIA_FIELDS}
 
 
 def undo_action(db: Session, user_id: int, action: dict, cfg) -> str:
@@ -113,7 +148,58 @@ def undo_action(db: Session, user_id: int, action: dict, cfg) -> str:
         if t is None:
             return "Already gone."
         db.delete(t)
+        _drop_new_people(db, user_id, action.get("people_created"))
         return "Transaction deleted."
+    if kind == "transaction_updated":
+        t = _own(db, Transaction, obj_id, user_id)
+        if t is None:
+            return "Already gone."
+        _restore_tx(t, action.get("before") or {})
+        _drop_new_people(db, user_id, action.get("people_created"))
+        return "Transaction restored."
+    if kind == "transaction_deleted":
+        snap = action.get("before") or {}
+        if not snap:
+            raise UndoError("Nothing kept to restore.")
+        t = Transaction(user_id=user_id)
+        _restore_tx(t, snap)
+        if t.person_id is not None and _own(db, Person, t.person_id, user_id) is None:
+            t.person_id = None
+        db.add(t)
+        return "Transaction restored."
+    if kind == "moment":
+        m = _own(db, PersonMoment, obj_id, user_id)
+        if m is not None:
+            db.delete(m)
+        _drop_new_people(db, user_id, action.get("people_created"))
+        return "Removed from their page."
+    if kind == "library_created":
+        m = _own(db, MediaItem, obj_id, user_id)
+        if m is None:
+            return "Already gone."
+        db.delete(m)
+        return "Removed from the library."
+    if kind == "library_updated":
+        m = _own(db, MediaItem, obj_id, user_id)
+        if m is None:
+            return "Already gone."
+        for k, v in (action.get("before") or {}).items():
+            setattr(m, k, v)
+        return "Library item restored."
+    if kind == "rule_created":
+        r = _own(db, ClassificationRule, obj_id, user_id)
+        if r is None:
+            return "Already gone."
+        db.delete(r)
+        db.flush()
+        from app.services.reclassify import reapply_rules
+
+        reapply_rules(db, user_id)
+        return "Rule removed; activity re-filed."
+    if kind == "idea_placed":
+        from app.services import journal_ideas
+
+        return journal_ideas.unplace(db, user_id, obj_id, cfg)
     if kind == "habit_log":
         log = _own(db, HabitLog, obj_id, user_id)
         if log is not None:
@@ -161,8 +247,13 @@ def undo_action(db: Session, user_id: int, action: dict, cfg) -> str:
 
 def undo_capture(db: Session, user_id: int, records: dict, cfg) -> dict:
     """Reverses a committed capture draft. Returns counts of what was removed."""
-    removed = {"time_entries": 0, "transactions": 0, "habit_logs": 0, "media": 0, "people": 0}
+    removed = {"time_entries": 0, "transactions": 0, "habit_logs": 0, "media": 0, "people": 0, "moments": 0}
     notes: list[str] = []
+    for mid in records.get("moments") or []:
+        m = _own(db, PersonMoment, mid, user_id)
+        if m is not None:
+            db.delete(m)
+            removed["moments"] += 1
     for eid in records.get("time_entries") or []:
         e = _own(db, TimeEntry, eid, user_id)
         if e is not None:
@@ -185,16 +276,7 @@ def undo_capture(db: Session, user_id: int, records: dict, cfg) -> dict:
         m = _own(db, MediaItem, upd.get("id"), user_id)
         if m is not None:
             m.status = upd.get("status_before") or m.status
-    db.flush()
-    for pid in records.get("people_created") or []:
-        p = _own(db, Person, pid, user_id)
-        if p is None:
-            continue
-        in_use = db.scalar(select(func.count()).select_from(time_entry_people).where(time_entry_people.c.person_id == pid))
-        in_use = in_use or db.scalar(select(func.count()).select_from(Transaction).where(Transaction.person_id == pid))
-        if not in_use:
-            db.delete(p)
-            removed["people"] += 1
+    removed["people"] = _drop_new_people(db, user_id, records.get("people_created"))
     if records.get("journal"):
         try:
             notes.append(undo_journal_append(db, user_id, cfg, records["journal"]))

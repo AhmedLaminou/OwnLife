@@ -525,6 +525,50 @@ export interface YoutubeStats {
   channel_lookup: { state: "idle" | "running" | "error"; done: number; total: number; found?: number; error?: string | null };
 }
 
+/** An idea found in a journal page's thought sections (Journal → Ideas). */
+export interface Idea {
+  id: number;
+  journal_entry_id: number | null;
+  date: string;
+  day_number: number | null;
+  title: string;
+  /** The idea restated by the model. */
+  statement: string;
+  /** The page's own words: what goes into an essay unless edited. */
+  quote: string;
+  domain: string;
+  essay: { id: number; title: string } | null;
+  new_essay: string | null;
+  references: { author: string; work: string; why: string; verified: boolean | null; url: string | null }[];
+  status: "new" | "kept" | "placed" | "dismissed";
+  placed_in: { id: number; title: string } | null;
+  placed_at: string | null;
+  model: string | null;
+}
+
+export interface IdeasState {
+  ideas: Idea[];
+  counts: Record<"new" | "kept" | "placed" | "dismissed", number>;
+  essays: { id: number; title: string; kind: string; words: number; is_private: boolean }[];
+  prefs: { scan: boolean };
+  scan: { state: "idle" | "running" | "error"; error?: string | null; days?: number; sections?: number; chars?: number; found?: number; new?: number; model?: string; finished_at?: string };
+  last_scan: string | null;
+  last_error: string | null;
+  pages_waiting: number;
+  /** The share of the journal (in characters) inside thought sections: what reading sends. */
+  thought_share: number;
+  online: boolean;
+  models: string[];
+}
+
+export interface EssayPassages {
+  id: number;
+  title: string;
+  words: number;
+  passages: { journal_entry_id: number; day_number: number | null; date: string | null; text: string; score: number }[];
+  error: string | null;
+}
+
 /** A video the extension measured, for sorting (Watching → YouTube). */
 export interface SortedVideo {
   video_id: string;
@@ -543,8 +587,10 @@ export interface YoutubeSorting {
   prefs: { strict: boolean; sort: boolean };
   ai: boolean;
   model: string;
-  status: { state: "idle" | "running" | "error"; at?: string; asked?: number; sorted?: number; guesses?: number; model?: string; error?: string | null };
+  status: { state: "idle" | "running" | "error"; at?: string; asked?: number; sorted?: number; guesses?: number; model?: string; error?: string | null; history?: boolean; done?: number; total?: number };
   unsorted_category: string;
+  /** Past videos (Takeout, Chrome) that nothing places and the model has not seen. */
+  history_unsorted: number;
   to_sort: SortedVideo[];
   by_model: SortedVideo[];
 }
@@ -643,8 +689,12 @@ export interface Transaction {
   category: string;
   counterparty: string | null;
   person_id: number | null;
+  /** The person it was given to or received from, when linked. */
+  person: string | null;
   note: string | null;
   source: string;
+  /** On create and update: a name that may be someone known, left unlinked. */
+  warnings?: string[];
 }
 
 /** The built-in window tracker (Settings → Integrations). */
@@ -715,6 +765,24 @@ export interface Person {
   entries?: number | TimeEntry[];
   last_seen?: string | null;
   transactions?: Transaction[];
+  money_in?: number;
+  money_out?: number;
+  /** In the list: counts. On one person's page: the moments themselves. */
+  gifts?: number;
+  moments?: number | PersonMoment[];
+  last_interaction?: string | null;
+}
+
+/** A gift they gave (gift_from) or you gave (gift_to), or something that happened. */
+export interface PersonMoment {
+  id: number;
+  person_id: number;
+  date: string;
+  kind: "gift_from" | "gift_to" | "moment";
+  text: string;
+  source: string;
+  journal_entry_id: number | null;
+  is_private: boolean;
 }
 
 export interface Rule {
@@ -785,10 +853,11 @@ export interface CaptureDraftBody {
   date: string;
   summary: string;
   time_entries: DraftTimeEntry[];
-  transactions: { include: boolean; item: string; amount: number; direction: "in" | "out"; category: string; counterparty: string | null }[];
+  transactions: { include: boolean; item: string; amount: number; direction: "in" | "out"; category: string; counterparty: string | null; person?: string | null }[];
   habit_logs: { include: boolean; habit_id: number; habit: string; status: string; time: string | null; note: string | null }[];
   media: { include: boolean; title: string; kind: string; creator: string | null; status: string }[];
   people: { include: boolean; name: string; relation: string | null }[];
+  moments?: { include: boolean; person: string; kind: PersonMoment["kind"]; text: string; day_offset: number }[];
   warnings: string[];
   journal_text?: string | null;
   /** Set on drafts the journal reader proposed: the text is already in the journal. */
@@ -820,6 +889,7 @@ export interface CaptureDraft {
 export interface CommitResult {
   created: Record<string, number>;
   errors: string[];
+  warnings?: string[];
   journal_sync: SyncResult | null;
 }
 

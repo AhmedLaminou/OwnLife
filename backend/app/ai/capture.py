@@ -23,6 +23,7 @@ from app.ai import rag
 from app.config import Settings, get_settings
 from app.models import Category, Habit, MediaItem, Person, Profile
 from app.services import filesync, records
+from app.services import people as people_service
 from app.services.privacy import redact
 from app.services.quicklog import match_category, match_habit
 from app.services.timeutil import hhmm_to_minutes, local_instant, minutes_to_hhmm, tz_of
@@ -48,7 +49,9 @@ class XTransaction(BaseModel):
     amount: float = Field(description="Positive number in the profile currency")
     direction: Literal["out", "in"] = "out"
     category: str = Field("other", description="transport, food, clothing, gift, education, health, phone, other…")
-    counterparty: str | None = None
+    counterparty: str | None = Field(None, description="Who was paid or who paid, when named (a shop, a driver, a person)")
+    person: str | None = Field(None, description="The name of someone the person knows (family, friend…) who gave or "
+                                                  "received the money; null for shops, drivers, companies")
 
 
 class XHabitLog(BaseModel):
@@ -70,6 +73,15 @@ class XPerson(BaseModel):
     relation: str | None = Field(None, description="family, friend, colleague, neighbour…")
 
 
+class XMoment(BaseModel):
+    person: str = Field(description="The name of the person it is about")
+    kind: Literal["gift_from", "gift_to", "moment"] = Field(
+        "moment", description="gift_from: they gave the person an object or a gift; gift_to: the person gave them one; "
+                              "moment: something they did or said")
+    text: str = Field(description="What happened, in one sentence, in the account's own words")
+    day_offset: int = Field(0, description="-1 if it happened on the day before the account's date")
+
+
 class Extraction(BaseModel):
     """Records found in an account of a day."""
 
@@ -78,6 +90,7 @@ class Extraction(BaseModel):
     habit_logs: list[XHabitLog] = Field(default_factory=list)
     media: list[XMedia] = Field(default_factory=list)
     people: list[XPerson] = Field(default_factory=list)
+    moments: list[XMoment] = Field(default_factory=list)
     summary: str = ""
 
 
@@ -102,6 +115,7 @@ class CommitTransaction(BaseModel):
     direction: Literal["out", "in"] = "out"
     category: str = "other"
     counterparty: str | None = None
+    person: str | None = None
 
 
 class CommitHabitLog(BaseModel):
@@ -126,6 +140,14 @@ class CommitPerson(BaseModel):
     relation: str | None = None
 
 
+class CommitMoment(BaseModel):
+    include: bool = True
+    person: str
+    kind: Literal["gift_from", "gift_to", "moment"] = "moment"
+    text: str
+    day_offset: int = 0
+
+
 class CommitDraft(BaseModel):
     date: dt.date
     summary: str | None = None
@@ -134,6 +156,7 @@ class CommitDraft(BaseModel):
     habit_logs: list[CommitHabitLog] = Field(default_factory=list)
     media: list[CommitMedia] = Field(default_factory=list)
     people: list[CommitPerson] = Field(default_factory=list)
+    moments: list[CommitMoment] = Field(default_factory=list)
     # When set, this text is appended to the day's journal entry.
     journal_text: str | None = None
 
@@ -195,6 +218,7 @@ def normalize(
         "habit_logs": [],
         "media": [],
         "people": [],
+        "moments": [],
         "warnings": warnings,
     }
     for t in ex.time_entries:
@@ -232,6 +256,10 @@ def normalize(
         if tx.amount <= 0:
             continue
         out["transactions"].append({"include": True, **tx.model_dump()})
+    for m in ex.moments:
+        if m.person.strip() and m.text.strip():
+            out["moments"].append({"include": True, "person": m.person.strip(), "kind": m.kind,
+                                   "text": " ".join(m.text.split()), "day_offset": max(-1, min(0, m.day_offset))})
     for h in ex.habit_logs:
         habit = match_habit(h.habit, habits)
         if habit is None:
@@ -257,9 +285,9 @@ def normalize(
         )
     for m in ex.media:
         out["media"].append({"include": True, **m.model_dump()})
-    seen = set(known)
+    seen = {people_service.name_key(n) for n in known}
     for p in ex.people:
-        key = p.name.strip().casefold()
+        key = people_service.name_key(p.name)
         if key and key not in seen:
             seen.add(key)
             out["people"].append({"include": True, "name": p.name.strip(), "relation": p.relation})
@@ -270,10 +298,11 @@ def commit(db: Session, user_id: int, profile: Profile, draft: CommitDraft, sour
     """Writes the ticked lines. The result lists every record created (or the
     values replaced) under "records", which is what makes the capture undoable."""
     tz = tz_of(profile.timezone)
-    counts = {"time_entries": 0, "transactions": 0, "habit_logs": 0, "media": 0, "people": 0}
+    counts = {"time_entries": 0, "transactions": 0, "habit_logs": 0, "media": 0, "people": 0, "moments": 0}
     rec: dict = {"time_entries": [], "transactions": [], "habit_logs": [], "media_created": [],
-                 "media_updated": [], "people_created": [], "journal": None}
+                 "media_updated": [], "people_created": [], "moments": [], "journal": None}
     errors: list[str] = []
+    warnings: list[str] = []
 
     def people_for(names: list[str]) -> list[Person]:
         before = {p.id for p in db.scalars(select(Person).where(Person.user_id == user_id))}
@@ -317,11 +346,29 @@ def commit(db: Session, user_id: int, profile: Profile, draft: CommitDraft, sour
                 db, user_id, profile.currency,
                 occurred_on=draft.date, direction=tx.direction, amount=tx.amount,
                 item=tx.item, category=tx.category, counterparty=tx.counterparty, source=source,
+                person=tx.person, warnings=warnings, people_created=rec["people_created"],
             )
             rec["transactions"].append(row.id)
             counts["transactions"] += 1
         except ValueError as exc:
             errors.append(f"{tx.item}: {exc}")
+
+    for mo in draft.moments:
+        if not mo.include:
+            continue
+        found = people_service.link(db, user_id, mo.person)
+        if found.person is None:
+            warnings.append(found.warning or f"“{mo.text}”: no person named {mo.person!r}.")
+            continue
+        if found.created:
+            rec["people_created"].append(found.person.id)
+        try:
+            row = people_service.add_moment(db, user_id, found.person, draft.date + dt.timedelta(days=mo.day_offset),
+                                            mo.text, mo.kind, source="journal" if source == "journal" else "capture")
+            rec["moments"].append(row.id)
+            counts["moments"] += 1
+        except ValueError as exc:
+            errors.append(f"{mo.person}: {exc}")
 
     for h in draft.habit_logs:
         if not h.include:
@@ -374,4 +421,4 @@ def commit(db: Session, user_id: int, profile: Profile, draft: CommitDraft, sour
                 db.delete(entry)
             errors.append(f"Journal not updated: {exc}")
     db.flush()
-    return {"created": counts, "errors": errors, "records": rec, "journal_sync": journal}
+    return {"created": counts, "errors": errors, "warnings": warnings, "records": rec, "journal_sync": journal}

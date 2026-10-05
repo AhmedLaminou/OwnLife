@@ -260,6 +260,10 @@ class SortPrefsIn(BaseModel):
     sort: bool | None = None
 
 
+class SortRunIn(BaseModel):
+    history: bool = False  # the past videos (Takeout, Chrome) instead of the recent ones
+
+
 class VideoCategoryIn(BaseModel):
     category_id: int
     whole_channel: bool = False  # a rule for the channel instead of this video alone
@@ -292,6 +296,7 @@ def youtube_sorting(user: CurrentUser, profile: CurrentProfile, db: DB, days: in
             to_sort.append({**_video_row(v, guess), "asked": verdict is not None})
     prefs = watchlive.settings_with_defaults((profile.prefs or {}).get("youtube"))
     return {"prefs": {"strict": prefs["strict"], "sort": prefs["sort"]},
+            "history_unsorted": len(videosort.history_to_sort(db, user.id, rules)),
             "ai": effective_mode(get_settings(), profile) != "off",
             "model": get_settings().ollama_chat_model, "status": videosort.status(user.id),
             "unsorted_category": watchlive.UNSORTED, "to_sort": to_sort, "by_model": by_model}
@@ -314,10 +319,10 @@ def youtube_sorting_prefs(body: SortPrefsIn, user: CurrentUser, profile: Current
 
 
 @router.post("/youtube/sorting/run")
-def youtube_sorting_run(user: CurrentUser, profile: CurrentProfile) -> dict:
+def youtube_sorting_run(user: CurrentUser, profile: CurrentProfile, body: SortRunIn | None = None) -> dict:
     if effective_mode(get_settings(), profile) == "off":
         raise HTTPException(400, "AI is off (Settings → AI): there is no model to sort the videos.")
-    return {"running": videosort.schedule(get_settings(), user.id, force=True)}
+    return {"running": videosort.schedule(get_settings(), user.id, force=True, history=bool(body and body.history))}
 
 
 @router.post("/youtube/videos/{video_id}/category")

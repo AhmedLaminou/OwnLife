@@ -21,6 +21,10 @@ category you choose for a video wins over every rule.
 The sorter runs in a background thread shortly after the extension sends
 videos nothing places, a few dozen at a time, at most every minute; after an
 error (Ollama not running) it waits 10 minutes.
+
+The history (Takeout, Chrome) is sorted on demand (Watching → Sorting → Sort
+the history): the same questions for every past video nothing places, then the
+estimated blocks are rebuilt with the answers.
 """
 
 from __future__ import annotations
@@ -45,13 +49,14 @@ from app.db import SessionLocal, utcnow
 from app.models import Category, MediaItem, Profile, TimeEntry, WatchEvent
 from app.services import watchlive
 from app.services.rules import Activity, RuleSet, load_ruleset
-from app.services.youtube import _cached, _remember, oembed
+from app.services.youtube import HISTORY_SOURCES, _cached, _remember, oembed
 
 log = logging.getLogger("ownlife")
 
 RECENT = timedelta(days=7)  # videos watched this recently are sorted by the model
 BATCH = 25
 MAX_BATCHES = 4  # per run: 100 videos
+HISTORY_MAX = 600  # past videos per "sort the history" run
 EVERY = timedelta(minutes=1)
 AFTER_ERROR = timedelta(minutes=10)
 
@@ -96,6 +101,22 @@ def to_sort(db: Session, user_id: int, ruleset: RuleSet, since: datetime) -> lis
     return [v for v in watched_videos(db, user_id, since).values()
             if v.video_id not in seen and ruleset.classify(Activity(title=v.title, channel=v.channel,
                                                                     url=_url(v.video_id))) is None]
+
+
+def history_to_sort(db: Session, user_id: int, ruleset: RuleSet) -> list[Video]:
+    """Past videos (Takeout, Chrome's history) that nothing places and the model
+    has not seen: the newest first."""
+    seen = verdicts(db, user_id)
+    out: dict[str, Video] = {}
+    for ev in db.scalars(select(WatchEvent).where(
+            WatchEvent.user_id == user_id, WatchEvent.source.in_(HISTORY_SOURCES), WatchEvent.video_id.is_not(None))
+            .order_by(WatchEvent.occurred_at.desc())):
+        if ev.video_id in out or ev.video_id in seen:
+            continue
+        v = Video(ev.video_id, ev.title, ev.channel, last=ev.occurred_at)
+        if ruleset.classify(Activity(title=v.title, channel=v.channel, url=_url(v.video_id))) is None:
+            out[ev.video_id] = v
+    return list(out.values())
 
 
 def choices(db: Session, user_id: int) -> list[Category]:
@@ -246,20 +267,25 @@ def refile(db: Session, user_id: int, video_ids: set[str], *, unsorted_too: bool
     return n
 
 
-def sort(settings: Settings, user_id: int, asker: Asker | None = None, label: str = "") -> SortResult:
-    """Asks the model about the recent videos nothing places, stores the
-    answers, and re-files the blocks they change. No session stays open while
-    the model thinks."""
+def sort(settings: Settings, user_id: int, asker: Asker | None = None, label: str = "", history: bool = False,
+         progress: Callable[[int, int], None] | None = None) -> SortResult:
+    """Asks the model about the recent videos nothing places (or, with
+    history=True, the past ones), stores the answers, and re-files the blocks
+    they change. No session stays open while the model thinks."""
     res = SortResult()
     changed: set[str] = set()
-    try:
-        changed |= fill_channels(settings, user_id, utcnow() - RECENT)
-    except Exception as e:  # offline: the channels wait for the next run
-        log.warning("Finding the channels of measured videos failed: %s", e)
+    if not history:
+        try:
+            changed |= fill_channels(settings, user_id, utcnow() - RECENT)
+        except Exception as e:  # offline: the channels wait for the next run
+            log.warning("Finding the channels of measured videos failed: %s", e)
     with SessionLocal() as db:
-        pending = to_sort(db, user_id, load_ruleset(db, user_id), utcnow() - RECENT)
-        pending.sort(key=lambda v: v.last or utcnow(), reverse=True)
-        pending = pending[:BATCH * MAX_BATCHES]
+        if history:
+            pending = history_to_sort(db, user_id, load_ruleset(db, user_id))[:HISTORY_MAX]
+        else:
+            pending = to_sort(db, user_id, load_ruleset(db, user_id), utcnow() - RECENT)
+            pending.sort(key=lambda v: v.last or utcnow(), reverse=True)
+            pending = pending[:BATCH * MAX_BATCHES]
         categories = choices(db, user_id)
         for c in categories:
             db.expunge(c)
@@ -276,6 +302,8 @@ def sort(settings: Settings, user_id: int, asker: Asker | None = None, label: st
                 res.errors.append(describe_error(e))
                 break
             res.asked += len(batch)
+            if progress is not None:
+                progress(res.asked, len(pending))
             with SessionLocal() as db:
                 for vid, cat, sure in answers:
                     remember(db, user_id, by_id[vid], cat, "model" if sure else "guess")
@@ -286,7 +314,13 @@ def sort(settings: Settings, user_id: int, asker: Asker | None = None, label: st
                         res.guesses += 1
                 db.commit()
     with SessionLocal() as db:
-        res.refiled = refile(db, user_id, changed)
+        if history:
+            if changed:  # the estimated blocks are rebuilt from the answers
+                from app.services.reclassify import reapply_rules
+
+                res.refiled = reapply_rules(db, user_id)["youtube_blocks_rebuilt"]
+        else:
+            res.refiled = refile(db, user_id, changed)
     return res
 
 
@@ -307,9 +341,10 @@ def enabled(db: Session, settings: Settings, user_id: int) -> bool:
     return bool(prefs["sort"]) and effective_mode(settings, profile) != "off"
 
 
-def schedule(settings: Settings, user_id: int, force: bool = False) -> bool:
+def schedule(settings: Settings, user_id: int, force: bool = False, history: bool = False) -> bool:
     """Starts a sorting in the background, unless one runs, one ran less than a
-    minute ago (10 after an error), sorting is off, or AI is off."""
+    minute ago (10 after an error), sorting is off, or AI is off. history=True:
+    the past videos instead of the recent ones."""
     now = utcnow()
     with _lock:
         if (_status.get(user_id) or {}).get("state") == "running":
@@ -321,14 +356,21 @@ def schedule(settings: Settings, user_id: int, force: bool = False) -> bool:
         if not enabled(db, settings, user_id):
             return False
     with _lock:
-        _status[user_id] = {**(_status.get(user_id) or {}), "state": "running"}
-    threading.Thread(target=_run, args=(settings, user_id), daemon=True, name=f"video-sort-{user_id}").start()
+        _status[user_id] = {**(_status.get(user_id) or {}), "state": "running", "history": history, "done": 0, "total": 0}
+    threading.Thread(target=_run, args=(settings, user_id, history), daemon=True, name=f"video-sort-{user_id}").start()
     return True
 
 
-def _run(settings: Settings, user_id: int) -> None:
+def _progress(user_id: int):
+    def report(done: int, total: int) -> None:
+        with _lock:
+            _status[user_id] = {**(_status.get(user_id) or {}), "done": done, "total": total}
+    return report
+
+
+def _run(settings: Settings, user_id: int, history: bool = False) -> None:
     try:
-        res = sort(settings, user_id)
+        res = sort(settings, user_id, history=history, progress=_progress(user_id))
         state = {"state": "error" if res.errors else "idle", "at": utcnow().isoformat(), "asked": res.asked,
                  "sorted": res.sorted, "guesses": res.guesses, "model": res.model,
                  "error": res.errors[0] if res.errors else None}

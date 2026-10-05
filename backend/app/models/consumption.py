@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Date,
@@ -14,10 +15,13 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base, UTCDateTime
 from app.models.base import Timestamps, UserOwned
+
+if TYPE_CHECKING:
+    from app.models.ledger import Person
 
 
 class MediaItem(UserOwned, Timestamps, Base):
@@ -92,6 +96,8 @@ class Transaction(UserOwned, Timestamps, Base):
     person_id: Mapped[int | None] = mapped_column(ForeignKey("people.id", ondelete="SET NULL"))
     note: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str] = mapped_column(String(30), default="manual")
+
+    person: Mapped[Person | None] = relationship(lazy="joined")
 
 
 class MoneySuggestion(UserOwned, Timestamps, Base):

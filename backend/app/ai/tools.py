@@ -19,8 +19,26 @@ from app.ai import rag
 from app.ai.embeddings import OllamaEmbedder
 from app.config import get_settings
 from app.db import SessionLocal, utcnow
-from app.models import Category, Goal, Habit, LifeEvent, Person, PlanBlock, Profile, Transaction
-from app.services import filesync, prayer, records
+from app.models import (
+    Category,
+    ClassificationRule,
+    Goal,
+    Habit,
+    Idea,
+    LifeEvent,
+    MediaItem,
+    Note,
+    Person,
+    PersonMoment,
+    PlanBlock,
+    Profile,
+    TimeEntry,
+    Transaction,
+    time_entry_people,
+)
+from app.services import filesync, prayer, reclassify, records
+from app.services import people as people_service
+from app.services import undo as undo_service
 from app.services.goals import goal_tree
 from app.services.habits import habit_stats
 from app.services.ledger import KIND_ORDER, daily_breakdown, effective_spans, entries_overlapping
@@ -90,6 +108,20 @@ def _n(count: int, word: str) -> str:
 
 def _money(amount: float) -> str:
     return f"{amount:,.2f}".rstrip("0").rstrip(".")
+
+
+def _person_money(db, user_id: int) -> dict[int, dict[str, float]]:
+    out: dict[int, dict[str, float]] = {}
+    for t in db.scalars(select(Transaction).where(Transaction.user_id == user_id, Transaction.person_id.is_not(None))):
+        d = out.setdefault(t.person_id, {"in": 0.0, "out": 0.0})
+        d[t.direction] += records.from_minor(t.amount_minor, t.currency)
+    return out
+
+
+# The tools a small local model gets: its window (4,096 tokens by default)
+# cannot hold all of them next to the system prompt.
+LOCAL_TOOLS = ("search_memory", "get_day", "get_time_summary", "log_time", "start_timer", "stop_timer",
+               "resume_timer", "log_expense", "log_habit", "add_to_journal", "get_spending", "plan_block")
 
 
 _KINDS = {"core", "growth", "work", "spirit", "social", "body", "maintenance", "noise", "destructive"}
@@ -326,22 +358,33 @@ def build_tools(ctx: ToolContext) -> list[BaseTool]:
         category: str = "other",
         day: str = "today",
         counterparty: str | None = None,
+        person: str | None = None,
     ) -> str:
-        """Record money spent (direction 'out') or received ('in'), in the profile currency."""
+        """Record money spent (direction 'out') or received ('in'), in the profile
+        currency. category: food, transport, phone, clothing, education, health,
+        gift, family, shopping, income or other. person: the name of someone the
+        person knows who gave or received it (added to People when new) — not for
+        shops or drivers, which go in counterparty. day: YYYY-MM-DD, 'today' or
+        'yesterday'."""
         with SessionLocal() as db:
             profile, _, today = env(db)
+            warnings: list[str] = []
+            created: list[int] = []
             try:
                 tx = records.create_transaction(
                     db, uid, profile.currency,
                     occurred_on=_parse_date(day, today), direction=direction, amount=amount,
                     item=item, category=category, counterparty=counterparty, source="ai",
+                    person=person, warnings=warnings, people_created=created,
                 )
             except ValueError as e:
                 return f"Not recorded: {e}"
             db.commit()
-            ctx.actions.append({"type": "transaction", "id": tx.id, "label": f"{item} {amount:g}"})
+            ctx.actions.append({"type": "transaction", "id": tx.id, "label": f"{item} {amount:g}", "people_created": created})
             sign = "-" if direction == "out" else "+"
-            return f"Recorded {sign}{amount:g} {profile.currency}: {item}."
+            who = f" — {tx.person.name}" + (" (new in People)" if created else "") if tx.person else ""
+            return f"Recorded #{tx.id} {sign}{amount:g} {profile.currency} on {tx.occurred_on}: {item}{who}." + (
+                " " + " ".join(warnings) if warnings else "")
 
     @tool
     def log_habit(habit: str, status: str, day: str = "today", time: str | None = None, note: str | None = None) -> str:
@@ -705,6 +748,299 @@ def build_tools(ctx: ToolContext) -> list[BaseTool]:
                     f"{minutes_to_hhmm(o.start_minute)}–{minutes_to_hhmm(o.end_minute)} {o.title}" for o in clash) + "."
             return out
 
+
+    # ---------------------------------------------------------------- people
+    @tool
+    def get_person(name: str | None = None) -> str:
+        """What is known about a person (by name): relation, notes, time together,
+        money given and received, gifts and moments. Without a name: everyone, one
+        line each."""
+        with SessionLocal() as db:
+            profile, _, _ = env(db)
+            if not name:
+                rows = db.scalars(select(Person).where(Person.user_id == uid).order_by(Person.name)).all()
+                if not rows:
+                    return "No people recorded yet."
+                money = _person_money(db, uid)
+                lines = []
+                for p in rows:
+                    if ctx.for_cloud and p.is_private:
+                        continue
+                    m = money.get(p.id, {"in": 0.0, "out": 0.0})
+                    extra = f", received {_money(m['in'])}, gave {_money(m['out'])}" if m["in"] or m["out"] else ""
+                    lines.append(f"- {p.name}" + (f" ({p.relation})" if p.relation else "") + extra)
+                return "\n".join(lines) or "No people to show."
+            p = people_service.match(db, uid, name).person
+            if p is None:
+                close = people_service.match(db, uid, name).candidates
+                return (f"No one named {name!r}." + (" Maybe: " + ", ".join(c.name for c in close) + "." if close else ""))
+            if ctx.for_cloud and p.is_private:
+                return f"{p.name} is marked private: nothing about them leaves this computer."
+            lines = [f"{p.name}" + (f" — {p.relation}" if p.relation else "")]
+            if p.notes:
+                lines.append("Notes: " + (redact(p.notes, profile) if ctx.for_cloud else p.notes)[:600])
+            now = utcnow()
+            entries = db.scalars(select(TimeEntry).join(time_entry_people, TimeEntry.id == time_entry_people.c.time_entry_id)
+                                 .where(time_entry_people.c.person_id == p.id).order_by(TimeEntry.started_at.desc())).unique().all()
+            if entries:
+                total = sum(((e.ended_at or now) - e.started_at).total_seconds() for e in entries)
+                lines.append(f"Time together: {_h(total)} over {_n(len(entries), 'entry')}; last {entries[0].started_at:%d/%m/%Y} "
+                             f"({entries[0].title}).")
+            txs = db.scalars(select(Transaction).where(Transaction.person_id == p.id)
+                             .order_by(Transaction.occurred_on.desc())).all()
+            if txs:
+                got = sum(records.from_minor(t.amount_minor, t.currency) for t in txs if t.direction == "in")
+                gave = sum(records.from_minor(t.amount_minor, t.currency) for t in txs if t.direction == "out")
+                lines.append(f"Money: received {_money(got)}, gave {_money(gave)} {profile.currency}. " + "; ".join(
+                    f"{t.occurred_on:%d/%m} {'+' if t.direction == 'in' else '-'}{_money(records.from_minor(t.amount_minor, t.currency))}"
+                    f" {t.item}" for t in txs[:8]))
+            moments = db.scalars(select(PersonMoment).where(PersonMoment.person_id == p.id)
+                                 .order_by(PersonMoment.occurred_on.desc())).all()
+            for m in moments[:12]:
+                label = {"gift_from": "gave you", "gift_to": "you gave", "moment": "moment"}[m.kind]
+                text = "(private)" if ctx.for_cloud and m.is_private else (redact(m.text, profile) if ctx.for_cloud else m.text)
+                lines.append(f"- {m.occurred_on:%d/%m/%Y} {label}: {text}")
+            return "\n".join(lines)
+
+    @tool
+    def add_person_moment(person: str, text: str, kind: str = "moment", day: str = "today") -> str:
+        """Remember something about a person on their page: kind 'gift_from' (they
+        gave the person an object or a gift), 'gift_to' (the person gave them one)
+        or 'moment' (something they did or said). text: one sentence, in the
+        person's own words. day: YYYY-MM-DD, 'today' or 'yesterday'. The person is
+        added to People when new. Money is log_expense, not a moment."""
+        with SessionLocal() as db:
+            _, _, today = env(db)
+            found = people_service.link(db, uid, person)
+            if found.person is None:
+                return f"Not added: {found.warning or 'no name given'} Ask which one they mean."
+            try:
+                m = people_service.add_moment(db, uid, found.person, _parse_date(day, today), text,
+                                              kind if kind in people_service.MOMENT_KINDS else "moment", source="ai")
+            except ValueError as e:
+                return f"Not added: {e}"
+            db.commit()
+            ctx.actions.append({"type": "moment", "id": m.id, "label": f"{found.person.name}: {m.text[:40]}",
+                                "people_created": [found.person.id] if found.created else []})
+            return f"Added to {found.person.name}'s page" + (" (new in People)" if found.created else "") + "."
+
+    # ---------------------------------------------------------------- money, line by line
+    @tool
+    def list_transactions(start_date: str = "today", end_date: str | None = None) -> str:
+        """Every transaction between two dates (YYYY-MM-DD, 'today' or 'yesterday';
+        end_date defaults to start_date), day by day, with its #id — needed to
+        correct or delete one."""
+        with SessionLocal() as db:
+            profile, _, today = env(db)
+            s = _parse_date(start_date, today)
+            e = _parse_date(end_date, today) if end_date else s
+            if e < s:
+                s, e = e, s
+            rows = db.scalars(select(Transaction).where(
+                Transaction.user_id == uid, Transaction.occurred_on >= s, Transaction.occurred_on <= e)
+                .order_by(Transaction.occurred_on, Transaction.id)).all()
+            if not rows:
+                return f"{s} → {e}: no transaction."
+            lines, day = [], None
+            for t in rows:
+                if t.occurred_on != day:
+                    day = t.occurred_on
+                    lines.append(f"{day:%A %d/%m/%Y}:")
+                amount = _money(records.from_minor(t.amount_minor, t.currency))
+                who = t.person.name if t.person else t.counterparty
+                item = redact(t.item, profile) if ctx.for_cloud else t.item
+                lines.append(f"- #{t.id} {'+' if t.direction == 'in' else '-'}{amount} {item} [{t.category}]"
+                             + (f" — {who}" if who else ""))
+            return "\n".join(lines)
+
+    @tool
+    def update_transaction(transaction_id: int, amount: float | None = None, item: str | None = None,
+                           category: str | None = None, day: str | None = None, direction: str | None = None,
+                           person: str | None = None) -> str:
+        """Correct a transaction found with list_transactions (by #id): its amount,
+        item, category, day, direction ('in'/'out') or the person who gave or
+        received it (added to People when new)."""
+        with SessionLocal() as db:
+            profile, _, today = env(db)
+            t = db.get(Transaction, transaction_id)
+            if t is None or t.user_id != uid:
+                return f"No transaction #{transaction_id}."
+            before = undo_service.tx_snapshot(t)
+            created: list[int] = []
+            if amount is not None:
+                if amount <= 0:
+                    return "Not changed: the amount must be positive."
+                t.amount_minor = records.to_minor(amount, t.currency)
+            if item:
+                t.item = item.strip()[:200]
+            if category:
+                t.category = category.strip().lower()[:60]
+            if day:
+                t.occurred_on = _parse_date(day, today)
+            if direction in ("in", "out"):
+                t.direction = direction
+            note = ""
+            if person:
+                found = people_service.link(db, uid, person)
+                if found.person is None:
+                    note = f" Not linked: {found.warning}"
+                else:
+                    t.person_id = found.person.id
+                    t.counterparty = t.counterparty or found.person.name
+                    created += [found.person.id] if found.created else []
+            db.commit()
+            ctx.actions.append({"type": "transaction_updated", "id": t.id, "label": f"Corrected {t.item}",
+                                "before": before, "people_created": created})
+            return f"Corrected #{t.id}: {'+' if t.direction == 'in' else '-'}{_money(records.from_minor(t.amount_minor, t.currency))} {t.item} on {t.occurred_on}.{note}"
+
+    @tool
+    def delete_transaction(transaction_id: int) -> str:
+        """Delete a transaction (by #id from list_transactions) that is wrong or
+        recorded twice. Only when the person asks for it."""
+        with SessionLocal() as db:
+            t = db.get(Transaction, transaction_id)
+            if t is None or t.user_id != uid:
+                return f"No transaction #{transaction_id}."
+            before = undo_service.tx_snapshot(t)
+            label = f"Deleted {t.item} {_money(records.from_minor(t.amount_minor, t.currency))}"
+            db.delete(t)
+            db.commit()
+            ctx.actions.append({"type": "transaction_deleted", "id": transaction_id, "label": label, "before": before})
+            return f"{label} ({before['occurred_on']})."
+
+    # ---------------------------------------------------------------- the library
+    @tool
+    def list_library(kind: str | None = None, status: str | None = None) -> str:
+        """Books, courses, series and the rest of the library, with their progress.
+        kind: book, course, series, anime, manga, movie, podcast… status: want,
+        in_progress, done, dropped."""
+        with SessionLocal() as db:
+            q = select(MediaItem).where(MediaItem.user_id == uid, MediaItem.kind != "video")
+            if kind:
+                q = q.where(MediaItem.kind == kind.strip().lower())
+            if status:
+                q = q.where(MediaItem.status == status.strip().lower())
+            rows = db.scalars(q.order_by(MediaItem.status, MediaItem.title)).all()
+            if not rows:
+                return "Nothing in the library" + (" with those filters." if kind or status else " yet.")
+            return "\n".join(
+                f"- [{m.kind}] {m.title}" + (f" — {m.creator}" if m.creator else "") + f": {m.status}"
+                + (f", {m.progress_current:g}" + (f"/{m.progress_total:g}" if m.progress_total else "")
+                   + f" {m.progress_unit or ''}".rstrip() if m.progress_current is not None else "")
+                for m in rows)
+
+    @tool
+    def update_library(title: str, kind: str = "book", status: str | None = None, progress: float | None = None,
+                       total: float | None = None, unit: str | None = None, creator: str | None = None) -> str:
+        """Add a book, course, series… to the library, or update one found by (part
+        of) its title: status (want | in_progress | done | dropped), progress (e.g.
+        page 120), total (e.g. 300 pages), unit (pages, episodes, lectures), creator
+        (author, channel)."""
+        with SessionLocal() as db:
+            rows = db.scalars(select(MediaItem).where(MediaItem.user_id == uid, MediaItem.kind != "video")).all()
+            key = title.casefold().strip()
+            m = next((x for x in rows if x.title.casefold() == key), None) or next(
+                (x for x in rows if key and key in x.title.casefold()), None)
+            created = m is None
+            before = None if created else undo_service.media_snapshot(m)
+            if created:
+                m = MediaItem(user_id=uid, kind=(kind or "book").strip().lower()[:20], title=title.strip()[:300],
+                              status="in_progress")
+                db.add(m)
+            if status in ("want", "in_progress", "done", "dropped"):
+                m.status = status
+            if progress is not None:
+                m.progress_current = progress
+            if total is not None:
+                m.progress_total = total
+            if unit:
+                m.progress_unit = unit.strip()[:20]
+            if creator:
+                m.creator = creator.strip()[:200]
+            db.commit()
+            if created:
+                ctx.actions.append({"type": "library_created", "id": m.id, "label": f"Library: {m.title}"})
+            else:
+                ctx.actions.append({"type": "library_updated", "id": m.id, "label": f"Library: {m.title}", "before": before})
+            done = f"{m.progress_current:g}" + (f"/{m.progress_total:g}" if m.progress_total else "") if m.progress_current is not None else ""
+            return f"{'Added' if created else 'Updated'} {m.title} [{m.kind}]: {m.status}" + (f", {done} {m.progress_unit or ''}".rstrip() if done else "") + "."
+
+    # ---------------------------------------------------------------- writing
+    @tool
+    def read_note(title: str | None = None, part: int = 1) -> str:
+        """Read one of the person's notes or essays in full (by part of its title),
+        in parts of about 6,000 characters. Without a title: the list of notes."""
+        with SessionLocal() as db:
+            profile, _, _ = env(db)
+            notes = db.scalars(select(Note).where(Note.user_id == uid, Note.visible()).order_by(Note.title)).all()
+            if not title:
+                return "\n".join(f"- {n.title} ({n.kind}, {len((n.body or '').split())} words)"
+                                  + (" — private" if n.is_private else "") for n in notes) or "No notes yet."
+            key = title.casefold().replace(" ", "")
+            n = next((x for x in notes if x.title.casefold().replace(" ", "") == key), None) or next(
+                (x for x in notes if key in x.title.casefold().replace(" ", "")), None)
+            if n is None:
+                return f"No note named {title!r}. Notes: " + ", ".join(x.title for x in notes)
+            if ctx.for_cloud and n.is_private:
+                return f"“{n.title}” is private: it stays on this computer."
+            body = n.body or ""
+            if not body.strip():
+                return f"“{n.title}” is empty so far."
+            size = 6000
+            parts = max(1, -(-len(body) // size))
+            k = max(1, min(int(part), parts))
+            chunk = body[(k - 1) * size: k * size]
+            text = redact(chunk, profile) if ctx.for_cloud else chunk
+            return f"“{n.title}” ({n.kind}), part {k} of {parts}:\n\n{text}"
+
+    @tool
+    def list_ideas(query: str | None = None, domain: str | None = None) -> str:
+        """Ideas found in the journal's thought sections: title, day, the essay they
+        belong to, and whether they were placed there. Filter by words or by domain
+        (philosophy, psychology, mathematics, physics, invention…)."""
+        with SessionLocal() as db:
+            profile, _, _ = env(db)
+            rows = db.scalars(select(Idea).where(Idea.user_id == uid, Idea.status != "dismissed")
+                              .order_by(Idea.entry_date.desc())).all()
+            if domain:
+                rows = [i for i in rows if i.domain == domain.strip().lower()]
+            if query:
+                q = query.casefold()
+                rows = [i for i in rows if q in f"{i.title} {i.statement} {i.quote}".casefold()]
+            if not rows:
+                return "No idea matches." if query or domain else "No ideas found yet."
+            notes = {n.id: n.title for n in db.scalars(select(Note).where(Note.user_id == uid))}
+            out = []
+            for i in rows[:30]:
+                where = (f"placed in {notes.get(i.placed_note_id, '?')}" if i.status == "placed"
+                         else f"for {notes[i.note_id]}" if i.note_id in notes
+                         else f"for a new essay “{i.new_essay}”" if i.new_essay else "no essay yet")
+                statement = redact(i.statement, profile) if ctx.for_cloud else i.statement
+                out.append(f"- [Day {i.day_number}] {i.title} ({i.domain}; {where}): {statement}")
+            return "\n".join(out)
+
+    # ---------------------------------------------------------------- rules
+    @tool
+    def add_rule(pattern: str, category: str, field: str = "channel") -> str:
+        """File activity by a rule: a YouTube channel (field 'channel'), words of a
+        title ('title'), a website ('domain') or a program ('app') → a category NAME.
+        Everything already recorded is re-filed."""
+        if field not in ("channel", "title", "domain", "app"):
+            return "field must be channel, title, domain or app."
+        with SessionLocal() as db:
+            cat, _ = resolve_category(db, uid, category, pattern)
+            if cat is None:
+                cats = db.scalars(select(Category).where(Category.user_id == uid, Category.archived.is_(False))).all()
+                return f"Unknown category {category!r}. Use one of: " + ", ".join(c.name for c in cats)
+            rule = ClassificationRule(user_id=uid, field=field, pattern=pattern.strip()[:300], category_id=cat.id,
+                                      note="By the assistant")
+            db.add(rule)
+            db.commit()
+            ctx.actions.append({"type": "rule_created", "id": rule.id, "label": f"Rule: {field} {pattern} → {cat.name}"})
+            done = reclassify.reapply_rules(db, uid)
+            moved = sum(done.values())
+            return f"Rule added: {field} “{pattern}” → {cat.name}; {moved} records re-filed."
+
     return [
         search_memory,
         get_time_summary,
@@ -727,6 +1063,16 @@ def build_tools(ctx: ToolContext) -> list[BaseTool]:
         list_life_events,
         add_life_event,
         plan_block,
+        get_person,
+        add_person_moment,
+        list_transactions,
+        update_transaction,
+        delete_transaction,
+        list_library,
+        update_library,
+        read_note,
+        list_ideas,
+        add_rule,
     ]
 
 

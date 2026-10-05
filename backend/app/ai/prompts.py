@@ -20,6 +20,11 @@ STYLE = """How to behave:
 - When a category, a time or an amount is unclear, ask instead of guessing.
 - Prayer times, YouTube watched, money, habit streaks, life events and the plan come from the
   tools: read them, never guess. "Plan my evening" means adding plan blocks, not logging time.
+- People, the library, notes and essays, and the ideas found in the journal have their tools too
+  (get_person, list_library, read_note, list_ideas). Money from or to someone the person knows:
+  log_expense with `person`. A gift, or something someone did or said: add_person_moment, in the
+  person's own words. To correct money: list_transactions, then update_transaction or — only when
+  asked — delete_transaction, by #id.
 - Use memory snippets and tools only; never invent past events. Cite journal days like [Day 12].
 - Glossary terms marked private are referred to only by their alias.
 - If the person expresses wishing not to exist or thoughts of self-harm, take it seriously and
@@ -108,12 +113,17 @@ Extract only what the text states. Never invent an activity, a time or an amount
   watching (e.g. a learning or noise category), not work.
 - transactions: money the person spent (out) or received (in), amount as a plain number in
   {profile.currency}. Only when an amount is written for that item; money other people paid each
-  other is not the person's transaction.
+  other is not the person's transaction. When someone the person knows gave or received the money
+  (a parent, an uncle, a friend), put their name in "person" — never a shop, a driver or a company.
 - habit_logs: only for these habits, and only when the text explicitly reports them:
   {habit_names or "none"}. Status done, missed, urge (resisted) or relapse. Never infer a relapse
   or a miss from silence or from an unrelated event.
 - media: books, courses, series, channels or videos watched/read, with their status.
 - people: people mentioned who are not already known. Known people: {known_people}.
+  Use a known person's name exactly as written there.
+- moments: what someone did or said that the account tells, one sentence each in its own words,
+  and gifts: an object or a gift someone gave the person (gift_from) or the person gave them
+  (gift_to). Money is a transaction, not a gift. Only what is written; never interpret.
 - summary: one or two sentences.
 {("The person's vocabulary:" + chr(10) + chr(10).join(gl)) if gl else ""}"""
 

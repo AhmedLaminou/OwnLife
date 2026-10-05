@@ -14,6 +14,7 @@ from app.models import (
     ClassificationRule,
     Goal,
     Habit,
+    Idea,
     JournalEntry,
     LifeChapter,
     LifeEvent,
@@ -21,6 +22,7 @@ from app.models import (
     MoneySuggestion,
     Note,
     Person,
+    PersonMoment,
     PlanBlock,
     PlanTemplate,
     Profile,
@@ -183,8 +185,45 @@ def tx_out(t: Transaction) -> dict:
         "category": t.category,
         "counterparty": t.counterparty,
         "person_id": t.person_id,
+        "person": t.person.name if t.person is not None else None,
         "note": t.note,
         "source": t.source,
+    }
+
+
+def moment_out(m: PersonMoment) -> dict:
+    return {
+        "id": m.id,
+        "person_id": m.person_id,
+        "date": iso(m.occurred_on),
+        "kind": m.kind,
+        "text": m.text,
+        "source": m.source,
+        "journal_entry_id": m.journal_entry_id,
+        "is_private": m.is_private,
+    }
+
+
+def idea_out(i: Idea, notes: dict[int, Note] | None = None) -> dict:
+    notes = notes or {}
+    essay = notes.get(i.note_id) if i.note_id else None
+    placed = notes.get(i.placed_note_id) if i.placed_note_id else None
+    return {
+        "id": i.id,
+        "journal_entry_id": i.journal_entry_id,
+        "date": iso(i.entry_date),
+        "day_number": i.day_number,
+        "title": i.title,
+        "statement": i.statement,
+        "quote": i.quote,
+        "domain": i.domain,
+        "essay": {"id": essay.id, "title": essay.title} if essay else None,
+        "new_essay": i.new_essay,
+        "references": i.refs or [],
+        "status": i.status,
+        "placed_in": {"id": placed.id, "title": placed.title} if placed else None,
+        "placed_at": iso(i.placed_at),
+        "model": i.model,
     }
 
 

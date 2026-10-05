@@ -3,13 +3,13 @@ they are cut into for search and retrieval."""
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, Date, Index, Integer, LargeBinary, String, Text, or_
+from sqlalchemy import JSON, Boolean, Date, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, or_
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db import Base
+from app.db import Base, UTCDateTime
 from app.models.base import Timestamps, UserOwned
 
 
@@ -68,6 +68,41 @@ class Note(UserOwned, Timestamps, Base):
     @classmethod
     def visible(cls):
         return or_(cls.sync_state.is_(None), cls.sync_state != "missing")
+
+
+class Idea(UserOwned, Timestamps, Base):
+    """An idea found in a journal page (a [SomeThoughts] section): in your words
+    (`quote`, the exact passage), restated by the model (`statement`), the essay
+    it belongs to — an existing one (`note_id`) or a new one (`new_essay`) — and
+    references to authors who wrote on the same question. Placing it appends a
+    section to the essay; `placed_text` is that section, kept for undo."""
+
+    __tablename__ = "ideas"
+    __table_args__ = (
+        UniqueConstraint("user_id", "fingerprint"),
+        Index("ix_ideas_user_status", "user_id", "status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    journal_entry_id: Mapped[int | None] = mapped_column(ForeignKey("journal_entries.id", ondelete="SET NULL"))
+    entry_date: Mapped[date] = mapped_column(Date)
+    day_number: Mapped[int | None] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(200))
+    statement: Mapped[str] = mapped_column(Text)
+    quote: Mapped[str] = mapped_column(Text)
+    # mathematics, physics, computer science, ai, robotics, invention, philosophy,
+    # psychology, society, culture, history, geography, literature, religion, other
+    domain: Mapped[str] = mapped_column(String(30), default="other")
+    note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id", ondelete="SET NULL"))
+    new_essay: Mapped[str | None] = mapped_column(String(200))
+    # [{"author", "work", "why", "verified": bool | None, "url"}]
+    refs: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="new")  # new | placed | kept | dismissed
+    placed_note_id: Mapped[int | None] = mapped_column(ForeignKey("notes.id", ondelete="SET NULL"))
+    placed_text: Mapped[str | None] = mapped_column(Text)
+    placed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    fingerprint: Mapped[str] = mapped_column(String(64))
+    model: Mapped[str | None] = mapped_column(String(300))
 
 
 class Chunk(UserOwned, Base):

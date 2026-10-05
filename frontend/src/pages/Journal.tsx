@@ -22,7 +22,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router";
 import { CaptureModal } from "../components/domain";
-import { Badge, Button, Card, Empty, ErrorNote, Input, Modal, PageHeader, Spinner, Tabs, Textarea, Toggle, useToast } from "../components/ui";
+import { Badge, Button, Card, Empty, ErrorNote, Input, Modal, PageHeader, Select, Spinner, Tabs, Textarea, Toggle, useToast } from "../components/ui";
+import { IdeasTab } from "./Ideas";
 import { ApiError, api } from "../lib/api";
 import { longDate, shortDate } from "../lib/format";
 import { useDebounced, useToday } from "../lib/hooks";
@@ -477,9 +478,9 @@ function Reader({ id, onOpen }: { id: number; onOpen: (id: number) => void }) {
 function NoteEditor({ open, onClose, note }: { open: boolean; onClose: () => void; note: Note | null }) {
   const qc = useQueryClient();
   const syncToast = useSyncToast();
-  const [form, setForm] = useState({ title: "", body: "", is_private: false });
+  const [form, setForm] = useState({ title: "", body: "", is_private: false, kind: "essay" });
   useEffect(() => {
-    if (open) setForm(note ? { title: note.title, body: note.body ?? "", is_private: note.is_private } : { title: "", body: "", is_private: false });
+    if (open) setForm(note ? { title: note.title, body: note.body ?? "", is_private: note.is_private, kind: note.kind } : { title: "", body: "", is_private: false, kind: "essay" });
   }, [open, note]);
   const save = useMutation({
     mutationFn: () =>
@@ -500,7 +501,17 @@ function NoteEditor({ open, onClose, note }: { open: boolean; onClose: () => voi
             : "A new note becomes a Markdown file beside your journal, named after the title (ReadingNotes.md)."}
         </p>
         <Textarea rows={16} value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} className="text-[15px] leading-7" />
-        <Toggle checked={form.is_private} onChange={(v) => setForm({ ...form, is_private: v })} label="Private — never sent to a cloud model" />
+        <div className="flex flex-wrap items-center gap-4">
+          <Toggle checked={form.is_private} onChange={(v) => setForm({ ...form, is_private: v })} label="Private — never sent to a cloud model" />
+          <label className="flex items-center gap-2 text-sm text-ink-2">
+            Kind
+            <Select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })} className="!w-auto" aria-label="Kind">
+              <option value="essay">Essay — receives ideas</option>
+              <option value="note">Note — receives ideas</option>
+              <option value="reference">Reference — never receives ideas</option>
+            </Select>
+          </label>
+        </div>
         <ErrorNote error={save.error} />
         <div className="flex justify-end">
           <Button variant="primary" onClick={() => save.mutate()} loading={save.isPending} disabled={!form.title.trim()}>Save</Button>
@@ -608,7 +619,7 @@ function NotesTab() {
 export function JournalPage() {
   const today = useToday();
   const [params, setParams] = useSearchParams();
-  const [tab, setTab] = useState<"days" | "notes">(params.get("note") ? "notes" : "days");
+  const [tab, setTab] = useState<"days" | "notes" | "ideas">(params.get("note") ? "notes" : params.get("tab") === "ideas" ? "ideas" : "days");
   const [q, setQ] = useState("");
   const [tag, setTag] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -649,13 +660,15 @@ export function JournalPage() {
         subtitle={`${list.data?.total ?? 0} pages · “so that even at 50, heck even 100, I'd know what I've been doing”`}
         actions={
           <>
-            <Tabs value={tab} onChange={setTab} tabs={[{ id: "days", label: "Days" }, { id: "notes", label: "Notes" }]} />
+            <Tabs value={tab} onChange={setTab} tabs={[{ id: "days", label: "Days" }, { id: "notes", label: "Notes" }, { id: "ideas", label: "Ideas" }]} />
             <Button variant="primary" icon={<Plus size={15} />} onClick={() => setCreating(true)}>New page</Button>
           </>
         }
       />
       <div className="mb-5"><SyncBar onOpenPanel={() => setPanel(true)} /></div>
-      {tab === "notes" ? (
+      {tab === "ideas" ? (
+        <IdeasTab />
+      ) : tab === "notes" ? (
         <NotesTab />
       ) : (
         <div className="grid gap-5 lg:grid-cols-[360px_1fr]">

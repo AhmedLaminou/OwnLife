@@ -143,7 +143,8 @@ def test_undo_a_whole_capture(client, categories, env):
     assert "paid a taxi" in path.read_text(encoding="utf-8")
 
     undone = client.post(f"/api/ai/drafts/{draft_id}/undo").json()
-    assert undone["removed"] == {"time_entries": 1, "transactions": 1, "habit_logs": 0, "media": 0, "people": 1}
+    assert undone["removed"] == {"time_entries": 1, "transactions": 1, "habit_logs": 0, "media": 0, "people": 1,
+                                 "moments": 0}
     assert client.get(f"/api/ai/drafts/{draft_id}").json()["status"] == "pending"  # back in the inbox
     assert client.get("/api/money", params={"start": DAY.isoformat(), "end": DAY.isoformat()}).json() == []
     assert "paid a taxi" not in path.read_text(encoding="utf-8")

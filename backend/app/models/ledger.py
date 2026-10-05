@@ -3,13 +3,14 @@ and the rules that classify imported activity."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Date,
     ForeignKey,
     Index,
     Integer,
@@ -71,6 +72,25 @@ class Person(UserOwned, Timestamps, Base):
     relation: Mapped[str | None] = mapped_column(String(40))
     notes: Mapped[str | None] = mapped_column(Text)
     tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    is_private: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class PersonMoment(UserOwned, Timestamps, Base):
+    """Something between you and a person, on a day: a gift they gave you
+    (gift_from), one you gave them (gift_to), or a moment — what they did or
+    said. Money goes through transactions; time through time entries. A private
+    moment never reaches a cloud model."""
+
+    __tablename__ = "person_moments"
+    __table_args__ = (Index("ix_person_moments_person_date", "person_id", "occurred_on"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    person_id: Mapped[int] = mapped_column(ForeignKey("people.id", ondelete="CASCADE"))
+    occurred_on: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(12), default="moment")  # gift_from | gift_to | moment
+    text: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(20), default="manual")  # manual | ai | capture | journal
+    journal_entry_id: Mapped[int | None] = mapped_column(ForeignKey("journal_entries.id", ondelete="SET NULL"))
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
 
 

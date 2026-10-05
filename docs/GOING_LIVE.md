@@ -132,6 +132,15 @@ YouTube gives no app your watch history (removed from its API in 2016). So:
 Then give categories to your top channels (Watching → Channels): each choice
 becomes a rule, and the history and measured minutes are re-filed.
 
+## 5b. Ideas for your essays — one decision
+
+Journal → **Ideas**. Your [SomeThoughts] sections go to the online models of your
+chain to find the ideas, the essay each belongs to and authors who wrote on the
+same question. The page shows how much of your journal those sections are:
+reading them sends that much of it, private aliases removed, private pages never. Press **Read** to read once; switch on *Read new pages by
+themselves* to keep it going. Mark a note that should never receive ideas as
+*Reference* (Journal → Notes → edit → Kind).
+
 ## 6. The window tracker — the rest of the laptop, built in
 
 On by default: OwnLife itself notes which program and window you use, every 5

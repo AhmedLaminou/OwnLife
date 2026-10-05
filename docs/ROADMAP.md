@@ -71,6 +71,21 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
 - Smart App Control started blocking `jiter`, which broke every AI feature: a
   pure-Python stand-in takes its place.
 
+**v0.2.5 (2026-10-05)** — people, money by day, ideas for the essays:
+
+- **Money day by day**: today, yesterday, then each date with its totals; a click
+  on the chart opens a day; transactions can be corrected; the same amount twice
+  on a day is flagged.
+- **People with what went between you**: money linked to the person who gave or
+  received it (added when new, asked when only close), gifts, moments, merging two
+  entries for one person; Capture and the assistant fill them too.
+- **31 tools for the assistant** (people, money line by line, the library, notes
+  and essays, ideas, rules), the local fallback with a short list of 12.
+- **Ideas from the [SomeThoughts] sections** for the essays — with references
+  checked in Open Library, placed as sections, undoable; passages per essay found
+  locally. Reading by itself is off until switched on.
+- **The YouTube history sorted by the local model** on demand.
+
 ## Next, in the order that matters most
 
 1. **Go live** — apply the seed, run `scripts\autostart.ps1`, set
@@ -81,16 +96,19 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
    title; the OwnLife extension can report the active tab's site, so domain rules
    classify browsing as they classify YouTube (and news sites count against the
    noise budget as surely as news videos).
-3. **A screen over noise once the budget is spent** — optional: the extension
+3. **Google Takeout, the rest**: YouTube subscriptions (pre-sort the channels you
+   chose), Classroom (the university classes as courses, a chapter on the Life
+   page), Calendar.
+4. **A screen over noise once the budget is spent** — optional: the extension
    covers a noise video with "your hour is spent", one button for ten more
    minutes; learning videos never blocked.
-4. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
+5. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
    Gemini prompts, Chrome pages, searches. Searchable by the assistant
    (`search_activity`), shown under each day, private by default for cloud models.
    Waiting on a decision: which of those OwnLife should hold at all.
-5. **Weekly and monthly reviews** — the daily reviews, aggregated: trend of core
+6. **Weekly and monthly reviews** — the daily reviews, aggregated: trend of core
    hours, noise, sleep regularity, adherence, the relapse-hour chart.
-6. **Encryption at rest** — SQLCipher, or at least BitLocker on the drive: the
+7. **Encryption at rest** — SQLCipher, or at least BitLocker on the drive: the
    database holds the journal in clear.
 
 ## Later

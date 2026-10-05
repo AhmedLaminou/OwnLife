@@ -30,6 +30,7 @@ from app.routers import (
     devices,
     goals,
     habits,
+    ideas,
     integrations,
     journal,
     ledger,
@@ -43,7 +44,7 @@ from app.routers import (
     system,
 )
 from app.security import CSRF_HEADER
-from app.services import filesync, journal_money, journal_time, reminders, wintrack
+from app.services import filesync, journal_ideas, journal_money, journal_time, reminders, wintrack
 from app.services.activitywatch import ActivityWatchError
 from app.services.backup import backup_if_due, make_backup, mirror_latest
 
@@ -82,10 +83,10 @@ async def _periodic_reminders(settings: Settings) -> None:
 
 
 async def _periodic_journal_reading(settings: Settings) -> None:
-    """Money and time blocks read from the journal pages that changed."""
+    """Money, time blocks and ideas read from the journal pages that changed."""
     await asyncio.sleep(120)
     while True:
-        for name, reader in (("money", journal_money), ("time", journal_time)):
+        for name, reader in (("money", journal_money), ("time", journal_time), ("ideas", journal_ideas)):
             try:
                 await run_in_threadpool(reader.tick, settings)
             except Exception:
@@ -179,7 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     for r in (auth, profile, prefs, categories, ledger, journal, goals, habits, plan, media, money, people, life,
-              ai, integrations, devices, system):
+              ai, ideas, integrations, devices, system):
         app.include_router(r.router)
 
     dist = PROJECT_DIR / "frontend" / "dist"

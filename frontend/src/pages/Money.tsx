@@ -1,15 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { BookOpen, Check, Plus, RefreshCw, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { BookOpen, Check, Pencil, Plus, RefreshCw, Trash2, UserRound, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Columns, HBars } from "../components/charts";
 import { Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, StatTile, Tabs, Toggle, useToast } from "../components/ui";
 import { api, qs } from "../lib/api";
-import { addDays, clock, money, pluralize, shortDate } from "../lib/format";
+import { addDays, clock, longDate, money, pluralize, shortDate } from "../lib/format";
 import { useProfile, useTimeZone, useToday } from "../lib/hooks";
-import type { JournalMoney, MoneySummary, Transaction } from "../lib/types";
+import type { JournalMoney, MoneySummary, Person, Transaction } from "../lib/types";
 
-const CATEGORIES = ["transport", "food", "clothing", "phone", "education", "health", "gift", "family", "other"];
+const CATEGORIES = ["food", "transport", "phone", "clothing", "education", "health", "gift", "family", "shopping", "income", "other"];
 
 /** Amounts written in the journal, read by the model, waiting for a yes or a no. */
 function JournalMoneyCard({ currency }: { currency: string }) {
@@ -131,27 +131,116 @@ function JournalMoneyCard({ currency }: { currency: string }) {
   );
 }
 
+type TxForm = { date: string; direction: "in" | "out"; amount: string; item: string; category: string; counterparty: string; person: string };
+
+function dayTitle(day: string, today: string): string {
+  if (day === today) return `Today · ${longDate(day).replace(/ \d{4}$/, "")}`;
+  if (day === addDays(today, -1)) return `Yesterday · ${longDate(day).replace(/ \d{4}$/, "")}`;
+  return longDate(day);
+}
+
+/** One transaction to add or correct. "Person": someone you know — linked, or added to People. */
+function TxModal({ tx, open, onClose, currency, defaultDate }: { tx: Transaction | null; open: boolean; onClose: () => void; currency: string; defaultDate: string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const people = useQuery({ queryKey: ["people"], queryFn: () => api.get<Person[]>("/api/people"), enabled: open });
+  const blank: TxForm = { date: defaultDate, direction: "out", amount: "", item: "", category: "food", counterparty: "", person: "" };
+  const [f, setF] = useState<TxForm>(blank);
+  useEffect(() => {
+    if (!open) return;
+    setF(tx
+      ? { date: tx.date, direction: tx.direction, amount: String(tx.amount), item: tx.item, category: tx.category,
+          counterparty: tx.person ? "" : tx.counterparty ?? "", person: tx.person ?? "" }
+      : blank);
+  }, [open, tx]); // eslint-disable-line react-hooks/exhaustive-deps
+  const save = useMutation({
+    mutationFn: () => {
+      const person = f.person.trim();
+      const body = { date: f.date, direction: f.direction, amount: Number(f.amount), item: f.item, category: f.category,
+                     counterparty: f.counterparty.trim() || person || null };
+      // On a correction, an empty person unlinks; on an addition it is simply left out.
+      return tx ? api.patch<Transaction>(`/api/money/${tx.id}`, { ...body, person })
+                : api.post<Transaction>("/api/money", { ...body, person: person || null });
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ["money"] });
+      qc.invalidateQueries({ queryKey: ["people"] });
+      (r.warnings ?? []).forEach((w) => toast(w));
+      onClose();
+    },
+  });
+  const known = new Set((people.data ?? []).map((p) => p.name.toLowerCase()));
+  const isNew = f.person.trim() !== "" && people.data !== undefined && !known.has(f.person.trim().toLowerCase());
+  return (
+    <Modal open={open} onClose={onClose} title={tx ? "Correct a transaction" : "Add a transaction"}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Date"><Input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} required /></Field>
+          <Field label="Direction">
+            <Select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value as TxForm["direction"] })}>
+              <option value="out">Spent</option>
+              <option value="in">Received</option>
+            </Select>
+          </Field>
+          <Field label={`Amount (${currency === "XOF" ? "FCFA" : currency})`}><Input type="number" min={1} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} required /></Field>
+        </div>
+        <Field label="What"><Input value={f.item} onChange={(e) => setF({ ...f, item: e.target.value })} required placeholder="Taxi to the office" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Category">
+            <Select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
+              {[...new Set([...CATEGORIES, f.category])].map((c) => <option key={c}>{c}</option>)}
+            </Select>
+          </Field>
+          <Field label="Shop, driver…" hint="Who was paid, when it is not someone you know">
+            <Input value={f.counterparty} onChange={(e) => setF({ ...f, counterparty: e.target.value })} placeholder="the baker" />
+          </Field>
+        </div>
+        <Field label={f.direction === "in" ? "Received from (a person you know)" : "Given to (a person you know)"}
+          hint={isNew ? `“${f.person.trim()}” will be added to People` : "Linked to their page in People"}>
+          <Input list="tx-people" value={f.person} onChange={(e) => setF({ ...f, person: e.target.value })} placeholder="Uncle Kofi" />
+          <datalist id="tx-people">{(people.data ?? []).map((p) => <option key={p.id} value={p.name} />)}</datalist>
+        </Field>
+        <ErrorNote error={save.error} />
+        <div className="flex justify-end"><Button type="submit" variant="primary" loading={save.isPending}>{tx ? "Save" : "Add"}</Button></div>
+      </form>
+    </Modal>
+  );
+}
+
 export function MoneyPage() {
   const today = useToday();
   const qc = useQueryClient();
   const { data: profile } = useProfile();
   const currency = profile?.currency ?? "XOF";
   const [range, setRange] = useState("30");
+  const [day, setDay] = useState<string | null>(null);
   const start = addDays(today, -(Number(range) - 1));
   const summary = useQuery({ queryKey: ["money", "summary", range], queryFn: () => api.get<MoneySummary>(`/api/money/summary${qs({ start, end: today })}`) });
   const list = useQuery({ queryKey: ["money", "list", range], queryFn: () => api.get<Transaction[]>(`/api/money${qs({ start, end: today })}`) });
+  const [editing, setEditing] = useState<Transaction | null>(null);
   const [adding, setAdding] = useState(false);
-  const [f, setF] = useState({ date: today, direction: "out", amount: "", item: "", category: "food", counterparty: "" });
-  const create = useMutation({
-    mutationFn: () => api.post("/api/money", { ...f, amount: Number(f.amount), counterparty: f.counterparty || null }),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["money"] });
-      setAdding(false);
-      setF({ ...f, amount: "", item: "", counterparty: "" });
-    },
-  });
   const remove = useMutation({ mutationFn: (id: number) => api.del(`/api/money/${id}`), onSuccess: () => qc.invalidateQueries({ queryKey: ["money"] }) });
   const s = summary.data;
+  const groups = useMemo(() => {
+    const out: { date: string; rows: Transaction[]; out: number; in: number; twice: Set<number> }[] = [];
+    for (const t of list.data ?? []) {
+      if (day && t.date !== day) continue;
+      let g = out.find((x) => x.date === t.date);
+      if (!g) out.push((g = { date: t.date, rows: [], out: 0, in: 0, twice: new Set() }));
+      g.rows.push(t);
+      g[t.direction] += t.amount;
+    }
+    for (const g of out) {
+      const seen = new Map<string, number[]>();
+      for (const t of g.rows) seen.set(`${t.direction}|${t.amount}`, [...(seen.get(`${t.direction}|${t.amount}`) ?? []), t.id]);
+      for (const ids of seen.values()) if (ids.length > 1) ids.forEach((id) => g.twice.add(id));
+    }
+    return out;
+  }, [list.data, day]);
+  const todayRows = (list.data ?? []).filter((t) => t.date === today);
+  const spentToday = todayRows.filter((t) => t.direction === "out").reduce((a, t) => a + t.amount, 0);
+  const receivedToday = todayRows.filter((t) => t.direction === "in").reduce((a, t) => a + t.amount, 0);
+  const days = s?.by_day ?? [];
   return (
     <div className="space-y-5">
       <PageHeader
@@ -159,7 +248,7 @@ export function MoneyPage() {
         subtitle="Every franc in and out — taxis, beans, gifts."
         actions={
           <>
-            <Tabs value={range} onChange={setRange} tabs={[{ id: "7", label: "7 days" }, { id: "30", label: "30 days" }, { id: "90", label: "90 days" }]} />
+            <Tabs value={range} onChange={(v) => { setRange(v); setDay(null); }} tabs={[{ id: "7", label: "7 days" }, { id: "30", label: "30 days" }, { id: "90", label: "90 days" }]} />
             <Button variant="primary" icon={<Plus size={15} />} onClick={() => setAdding(true)}>Add</Button>
           </>
         }
@@ -170,20 +259,22 @@ export function MoneyPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatTile label="Spent" value={money(s.total_out, currency)} sub={`${money(s.avg_out_per_day, currency)} a day`} />
-            <StatTile label="Received" value={money(s.total_in, currency)} />
-            <StatTile label="Net" value={money(s.net, currency)} />
-            <StatTile label="Transactions" value={String(list.data?.length ?? 0)} />
+            <StatTile label="Today" value={money(spentToday, currency)} sub={receivedToday ? `spent · received ${money(receivedToday, currency)}` : "spent"} />
+            <StatTile label="Spent" value={money(s.total_out, currency)} sub={`${money(s.avg_out_per_day, currency)} a day over ${range} days`} />
+            <StatTile label="Received" value={money(s.total_in, currency)} sub={`over ${range} days`} />
+            <StatTile label="Net" value={money(s.net, currency)} sub={`over ${range} days`} />
           </div>
           <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
-            <Card title="Spent per day">
-              {s.by_day.length ? (
+            <Card title="Spent per day" subtitle="Click a day to see its transactions">
+              {days.length ? (
                 <Columns
                   title="Spent"
-                  data={s.by_day.map((d) => ({ label: shortDate(d.date), value: d.out, tip: d.date }))}
-                  format={(v) => Math.round(v).toLocaleString("en")}
-                  labelEvery={Math.ceil(s.by_day.length / 8)}
+                  data={days.map((d) => ({ label: shortDate(d.date), value: d.out, tip: d.date }))}
+                  format={(v) => (v >= 1000 ? `${Math.round(v / 100) / 10}k` : String(Math.round(v)))}
+                  labelEvery={Math.ceil(days.length / 8)}
                   color="var(--k-growth)"
+                  selected={day ? days.findIndex((d) => d.date === day) : null}
+                  onSelect={(i) => setDay(days[i].date === day ? null : days[i].date)}
                 />
               ) : (
                 <Empty title="Nothing recorded yet" />
@@ -197,58 +288,59 @@ export function MoneyPage() {
               )}
             </Card>
           </div>
-          <Card title="Transactions">
-            {list.data?.length ? (
-              <ul className="divide-y divide-line">
-                {list.data.map((t) => (
-                  <li key={t.id} className="group flex items-center gap-3 py-2.5 text-sm">
-                    <span className="w-16 text-[12px] text-ink-3">{shortDate(t.date)}</span>
-                    <span className="min-w-0 flex-1 truncate text-ink">
-                      {t.source === "journal" && <BookOpen size={12} className="mr-1.5 inline text-ink-3" aria-label="From the journal" />}
-                      <span title={t.note ?? undefined}>{t.item}</span>
-                      {t.counterparty && <span className="text-ink-3"> · {t.counterparty}</span>}
-                    </span>
-                    <span className="text-[12px] text-ink-3">{t.category}</span>
-                    <span className={clsx("num w-28 text-right font-medium", t.direction === "in" ? "text-good" : "text-ink")}>
-                      {t.direction === "in" ? "+" : "−"}{money(t.amount, t.currency)}
-                    </span>
-                    <button onClick={() => remove.mutate(t.id)} className="text-ink-3 opacity-0 hover:text-critical group-hover:opacity-100" aria-label="Delete">
-                      <Trash2 size={14} />
-                    </button>
-                  </li>
+          <Card
+            title={day ? dayTitle(day, today) : "Transactions"}
+            subtitle={day ? undefined : "Day by day; the newest first"}
+            action={day ? <Button size="sm" variant="ghost" onClick={() => setDay(null)}>Every day</Button> : undefined}
+          >
+            {groups.length ? (
+              <div className="space-y-4">
+                {groups.map((g) => (
+                  <section key={g.date}>
+                    {!day && (
+                      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-1.5">
+                        <button className="text-[13px] font-semibold text-ink hover:text-accent" onClick={() => setDay(g.date)}>{dayTitle(g.date, today)}</button>
+                        <span className="num text-[12px] text-ink-3">
+                          {g.out > 0 && <>spent <span className="text-ink">{money(g.out, currency)}</span></>}
+                          {g.out > 0 && g.in > 0 && " · "}
+                          {g.in > 0 && <>received <span className="text-good">{money(g.in, currency)}</span></>}
+                        </span>
+                      </div>
+                    )}
+                    <ul className="divide-y divide-line">
+                      {g.rows.map((t) => (
+                        <li key={t.id} className="group flex items-center gap-3 py-2.5 text-sm">
+                          <span className="min-w-0 flex-1 truncate text-ink">
+                            {t.source === "journal" && <BookOpen size={12} className="mr-1.5 inline text-ink-3" aria-label="From the journal" />}
+                            <span title={t.note ?? undefined}>{t.item}</span>
+                            {t.person ? (
+                              <span className="text-ink-2"> · <UserRound size={12} className="mb-0.5 inline text-accent" aria-label="Person" /> {t.person}</span>
+                            ) : t.counterparty ? <span className="text-ink-3"> · {t.counterparty}</span> : null}
+                            {g.twice.has(t.id) && (
+                              <span className="ml-2 rounded-md bg-warning/15 px-1.5 py-0.5 text-[11px] text-warning" title="The same amount twice this day: was it recorded twice?">same amount twice?</span>
+                            )}
+                          </span>
+                          <span className="hidden text-[12px] text-ink-3 sm:inline">{t.category}</span>
+                          <span className={clsx("num w-28 text-right font-medium", t.direction === "in" ? "text-good" : "text-ink")}>
+                            {t.direction === "in" ? "+" : "−"}{money(t.amount, t.currency)}
+                          </span>
+                          <span className="flex gap-1 opacity-0 group-focus-within:opacity-100 group-hover:opacity-100">
+                            <button onClick={() => setEditing(t)} className="text-ink-3 hover:text-accent" aria-label={`Correct ${t.item}`}><Pencil size={14} /></button>
+                            <button onClick={() => confirm(`Delete “${t.item}”?`) && remove.mutate(t.id)} className="text-ink-3 hover:text-critical" aria-label={`Delete ${t.item}`}><Trash2 size={14} /></button>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
                 ))}
-              </ul>
+              </div>
             ) : (
-              <Empty title="No transactions in this range">Write them in your journal (they appear above to confirm), add them here, or with quick-log (“-400 taxi #transport”).</Empty>
+              <Empty title={day ? "Nothing that day" : "No transactions in this range"}>Write them in your journal (they appear above to confirm), add them here, or tell the assistant.</Empty>
             )}
           </Card>
         </>
       )}
-      <Modal open={adding} onClose={() => setAdding(false)} title="Add a transaction">
-        <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="Date"><Input type="date" value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} /></Field>
-            <Field label="Direction">
-              <Select value={f.direction} onChange={(e) => setF({ ...f, direction: e.target.value })}>
-                <option value="out">Spent</option>
-                <option value="in">Received</option>
-              </Select>
-            </Field>
-            <Field label={`Amount (${currency === "XOF" ? "FCFA" : currency})`}><Input type="number" min={1} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} required /></Field>
-          </div>
-          <Field label="What"><Input value={f.item} onChange={(e) => setF({ ...f, item: e.target.value })} required placeholder="Taxi to the office" /></Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Category">
-              <Select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
-                {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
-              </Select>
-            </Field>
-            <Field label="From / to"><Input value={f.counterparty} onChange={(e) => setF({ ...f, counterparty: e.target.value })} placeholder="Uncle Karim" /></Field>
-          </div>
-          <ErrorNote error={create.error} />
-          <div className="flex justify-end"><Button type="submit" variant="primary" loading={create.isPending}>Add</Button></div>
-        </form>
-      </Modal>
+      <TxModal tx={editing} open={adding || editing !== null} onClose={() => { setAdding(false); setEditing(null); }} currency={currency} defaultDate={day ?? today} />
     </div>
   );
 }

@@ -482,6 +482,8 @@ export function Columns({
   unit = "",
   labelEvery = 1,
   title,
+  selected = null,
+  onSelect,
 }: {
   data: { label: string; value: number; tip?: string }[];
   height?: number;
@@ -490,6 +492,10 @@ export function Columns({
   unit?: string;
   labelEvery?: number;
   title: string;
+  /** The bar shown as chosen (the others dim). */
+  selected?: number | null;
+  /** Makes the bars clickable (and Enter on a focused bar). */
+  onSelect?: (index: number) => void;
 }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<number | null>(null);
@@ -524,8 +530,12 @@ export function Columns({
                   onMouseEnter={() => setHover(i)}
                   onFocus={() => setHover(i)}
                   onBlur={() => setHover(null)}
+                  onClick={onSelect ? () => onSelect(i) : undefined}
+                  onKeyDown={onSelect ? (e) => e.key === "Enter" && onSelect(i) : undefined}
+                  role={onSelect ? "button" : undefined}
+                  aria-pressed={onSelect ? selected === i : undefined}
                   aria-label={`${d.tip ?? d.label}: ${format(d.value)}${unit}`}
-                  style={{ outline: "none" }}
+                  style={{ outline: "none", cursor: onSelect ? "pointer" : undefined }}
                 >
                   <rect x={cx - band / 2} y={0} width={band} height={plotH} fill="transparent" />
                   {h > 0 && (
@@ -533,7 +543,7 @@ export function Columns({
                       d={topRoundedPath(cx - barW / 2, plotH - h, barW, h)}
                       fill={color}
                       initial={{ opacity: 0 }}
-                      animate={{ opacity: hover === null || hover === i ? 1 : 0.5 }}
+                      animate={{ opacity: hover === i || (hover === null && (selected === null || selected === i)) ? 1 : 0.45 }}
                       transition={{ duration: 0.3, delay: hover === null ? i * 0.01 : 0 }}
                     />
                   )}

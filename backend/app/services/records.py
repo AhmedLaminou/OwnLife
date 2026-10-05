@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Habit, HabitLog, JournalEntry, Person, TimeEntry, Transaction
+from app.services import people as people_service
 
 # Currencies whose minor unit is not 1/100. FCFA (XOF/XAF) has none.
 CURRENCY_EXPONENT = {"XOF": 0, "XAF": 0, "JPY": 0, "KRW": 0, "TND": 3, "KWD": 3, "BHD": 3, "OMR": 3}
@@ -24,16 +25,16 @@ def from_minor(amount_minor: int, currency: str) -> float:
 
 
 def resolve_people(db: Session, user_id: int, names: list[str], create: bool = True) -> list[Person]:
+    """The people these names mean (case, accents and spacing aside), created
+    when unknown. Money written earlier under a new person's name is linked."""
     out: list[Person] = []
     for raw in names:
         name = (raw or "").strip().lstrip("@")
         if not name:
             continue
-        person = db.scalar(select(Person).where(Person.user_id == user_id, Person.name.ilike(name)))
+        person = people_service.match(db, user_id, name).person
         if person is None and create:
-            person = Person(user_id=user_id, name=name[:120])
-            db.add(person)
-            db.flush()
+            person = people_service.create(db, user_id, name)
         if person is not None and person not in out:
             out.append(person)
     return out
@@ -197,15 +198,29 @@ def create_transaction(
     counterparty: str | None = None,
     note: str | None = None,
     source: str = "manual",
+    person: str | None = None,
+    warnings: list[str] | None = None,
+    people_created: list[int] | None = None,
 ) -> Transaction:
+    """`person`: someone you know who gave or received the money — linked, or
+    added to People when nobody has a close name (a close name is not guessed:
+    a warning says who it may be). `counterparty` alone (a shop, a driver) is
+    linked only to someone of exactly that name."""
     if direction not in ("in", "out"):
         raise ValueError("direction must be 'in' or 'out'")
     if amount <= 0:
         raise ValueError("amount must be positive")
-    person = None
-    if counterparty:
-        found = resolve_people(db, user_id, [counterparty], create=False)
-        person = found[0] if found else None
+    linked = None
+    if person and person.strip():
+        found = people_service.link(db, user_id, person.strip())
+        linked = found.person
+        if found.created and people_created is not None:
+            people_created.append(found.person.id)
+        if found.warning and warnings is not None:
+            warnings.append(found.warning)
+        counterparty = counterparty or person.strip()
+    elif counterparty:
+        linked = people_service.match(db, user_id, counterparty).person
     tx = Transaction(
         user_id=user_id,
         occurred_on=occurred_on,
@@ -214,8 +229,8 @@ def create_transaction(
         currency=currency,
         item=item.strip()[:200] or "Unspecified",
         category=(category or "other").strip().lower()[:60],
-        counterparty=counterparty,
-        person_id=person.id if person else None,
+        counterparty=(counterparty or "").strip()[:120] or None,
+        person_id=linked.id if linked else None,
         note=note,
         source=source,
     )

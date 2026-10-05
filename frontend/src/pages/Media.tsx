@@ -5,7 +5,7 @@ import { Columns, HBars } from "../components/charts";
 import { CategorySelect, useInvalidateLedger } from "../components/domain";
 import { Badge, Button, Card, Empty, ErrorNote, Field, Input, Modal, PageHeader, Select, Spinner, StatTile, Tabs, Toggle, useToast } from "../components/ui";
 import { api, qs } from "../lib/api";
-import { addDays, clock, compactNum, hm, num, shortDate } from "../lib/format";
+import { addDays, clock, compactNum, hm, num, pluralize, shortDate } from "../lib/format";
 import { useTimeZone, useToday } from "../lib/hooks";
 import { KIND_LABEL, chartKinds, kindColor } from "../lib/kinds";
 import type { HistoryImport, Kind, MeasuredToday as MeasuredTodayData, MediaItem, SortedVideo, YoutubeSorting, YoutubeStats, YoutubeSummary } from "../lib/types";
@@ -83,7 +83,7 @@ function SortingCard() {
     mutationFn: (body: Partial<YoutubeSorting["prefs"]>) => api.put<{ refiled: number }>("/api/media/youtube/sorting/prefs", body),
     onSuccess: refresh,
   });
-  const run = useMutation({ mutationFn: () => api.post("/api/media/youtube/sorting/run"), onSuccess: refresh });
+  const run = useMutation({ mutationFn: (history: boolean) => api.post("/api/media/youtube/sorting/run", { history }), onSuccess: refresh });
   const choose = useMutation({
     mutationFn: ({ v, category_id }: { v: SortedVideo; category_id: number }) =>
       api.post(`/api/media/youtube/videos/${v.video_id}/category`, { category_id, whole_channel: !!whole[v.video_id] }),
@@ -108,7 +108,7 @@ function SortingCard() {
       title="Sorting what you watch"
       subtitle={`Videos no rule places. Your local model (${data.model}) sorts them from their title and channel, on this laptop; what it cannot tell waits for you here.`}
       action={
-        <Button variant="ghost" icon={<Sparkles size={15} />} onClick={() => run.mutate()} loading={run.isPending || st.state === "running"}
+        <Button variant="ghost" icon={<Sparkles size={15} />} onClick={() => run.mutate(false)} loading={run.isPending || st.state === "running"}
           disabled={!data.ai || !data.prefs.sort}>
           Sort now
         </Button>
@@ -121,7 +121,18 @@ function SortingCard() {
           <Toggle checked={data.prefs.sort} onChange={(v) => prefs.mutate({ sort: v })} label="Let the local model sort new videos" />
         </div>
         {!data.ai && <p className="text-[13px] text-warning">AI is off (Settings → AI): nothing sorts the videos but you.</p>}
-        {st.state === "running" && <p className="flex items-center gap-2 text-[13px] text-ink-2"><Spinner /> Sorting…</p>}
+        {st.state === "running" && (
+          <p className="flex items-center gap-2 text-[13px] text-ink-2">
+            <Spinner /> {st.history ? `Sorting the history: ${st.done ?? 0} of ${st.total || "…"} videos` : "Sorting…"}
+          </p>
+        )}
+        {data.history_unsorted > 0 && st.state !== "running" && data.ai && (
+          <p className="flex flex-wrap items-center gap-2 text-[13px] text-ink-2">
+            {pluralize(data.history_unsorted, "past video")} (Takeout, Chrome) still without a category.
+            <Button size="sm" variant="secondary" onClick={() => run.mutate(true)} loading={run.isPending}>Sort the history too</Button>
+            <span className="text-[12px] text-ink-3">titles only, on this laptop; a few minutes per hundred</span>
+          </p>
+        )}
         {st.state === "error" && st.error && <p className="text-[13px] text-warning">The last sorting stopped: {st.error}</p>}
         {st.state !== "running" && st.asked ? (
           <p className="text-[12px] text-ink-3">

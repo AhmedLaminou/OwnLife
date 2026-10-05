@@ -22,6 +22,7 @@ const SUGGESTIONS = [
   "Plan tomorrow as a [Sprint] day around the internship.",
   "Which hours of the day am I most likely to fall into noise?",
   "What did I watch on YouTube yesterday, and for how long?",
+  "What did I spend yesterday, line by line?",
 ];
 
 const TOOL_LABEL: Record<string, string> = {
@@ -45,6 +46,16 @@ const TOOL_LABEL: Record<string, string> = {
   list_life_events: "read the life events",
   add_life_event: "added a life event",
   plan_block: "planned a block",
+  get_person: "read a person's page",
+  add_person_moment: "added to a person's page",
+  list_transactions: "listed the transactions",
+  update_transaction: "corrected a transaction",
+  delete_transaction: "deleted a transaction",
+  list_library: "read the library",
+  update_library: "updated the library",
+  read_note: "read a note",
+  list_ideas: "read the ideas",
+  add_rule: "added a rule",
 };
 
 interface LiveTurn {
@@ -441,7 +452,11 @@ function InboxTab() {
                     {d.draft.origin === "journal" && (
                       <span className="mr-1.5 text-accent">{d.draft.day_number ? `Journal · Day ${d.draft.day_number}` : "Journal"}</span>
                     )}
-                    {shortDate(d.date)} · {pluralize(d.draft.time_entries?.length ?? 0, "entry", "entries")}
+                    {shortDate(d.date)} · {[
+                      d.draft.time_entries?.length ? pluralize(d.draft.time_entries.length, "entry", "entries") : null,
+                      d.draft.transactions?.length ? pluralize(d.draft.transactions.length, "amount") : null,
+                      d.draft.moments?.length ? `${d.draft.moments.length} for People` : null,
+                    ].filter(Boolean).join(" · ") || "nothing found"}
                   </p>
                   <p className="line-clamp-2 text-[12px] text-ink-3">{d.input_text}</p>
                 </button>

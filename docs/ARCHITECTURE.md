@@ -39,16 +39,17 @@ app/
                      serves frontend/dist, daily backup + ActivityWatch tasks
   config.py          settings from backend/.env
   db.py              engine, sessions, UTCDateTime (store UTC, return aware datetimes)
-  models/            20 tables: core (users, sessions, profile), ledger (categories,
-                     time entries, people, rules), memory (journal, notes, chunks),
+  models/            22 tables: core (users, sessions, profile), ledger (categories,
+                     time entries, people and their moments, rules), memory (journal,
+                     notes, ideas, chunks),
                      direction (goals, chapters, habits, plans), consumption (media,
                      YouTube events, money), assistant (chat, drafts, integrations)
   services/          the logic, no HTTP: ledger maths (and which source wins),
                      life projections, habits, goals, journal parsing, the two-way
                      file sync (mdfile, filesync), YouTube history and live minutes
-                     (youtube, watchlive), ActivityWatch, rules, quick-log, records,
-                     undo, prayer times, reminders and notifications, backups,
-                     privacy, indexer
+                     (youtube, watchlive, videosort), ActivityWatch, rules, quick-log,
+                     records, people, ideas from the journal, undo, prayer times,
+                     reminders and notifications, backups, privacy, indexer
   ai/                llm (models + fallbacks), embeddings, rag, prompts, tools,
                      agent (the graph), capture, review
   routers/           thin HTTP layer: validate input, call services, serialise
@@ -198,6 +199,54 @@ entries you type. Private pages are never sent to a cloud model. First run,
 2026-10-04, free model: 35 pages in 2.5 minutes, 39 blocks on 23 days; 38 of
 them carry exactly the times written.
 
+## People: money, gifts and moments (`services/people.py`)
+
+A name is compared without case, accents or extra spaces. Money that comes from
+or goes to someone you know names them as its `person` (the form, the assistant,
+Capture): the transaction is linked to them, and a new name joins People. A name
+that only *resembles* someone known ("Kofi" next to "Uncle Kofi") is
+never guessed: the record stays unlinked and a warning says who it may be. A
+shop or a driver stays a plain `counterparty`. When a person is added, money
+written earlier under exactly that name is linked to them.
+
+`person_moments` holds the rest: a gift they gave (`gift_from`), one you gave
+(`gift_to`), or a moment — what they did or said — with its day and where it came
+from (by hand, the assistant, a capture, the journal). A moment can be private
+(never shown to a cloud model); People → *New moments are private* makes that the
+default (off for now). Two entries for one person are merged: time, money,
+moments and notes move, the duplicate goes.
+
+## Ideas for the essays (`services/journal_ideas.py`)
+
+The thought sections of each page — from a `[SomeThoughts]` line (typos and
+`[KeyThoughts…]` included) to the next line that starts with another `[Tag]`, and
+paragraphs starting with "Idea :" — go to the *online* models of the chain only
+(the local model is far too slow for whole sections), in batches of ~12,000
+characters, private aliases redacted, private pages never. Such sections often
+run to the end of the page, so they can be most of a journal — hence reading by
+itself is **off by default**, and the page shows the share that reading sends.
+
+The model returns, per idea: a title, the idea restated, the exact passage, a
+domain, the essay it belongs to (the essays' titles and first words are in the
+prompt; private essays are not) or a new one, and up to three references. The
+passage is anchored again on the page (`anchor`): what you place is your own
+words, even if the model saw redacted text or rephrased. A fingerprint (page +
+passage) keeps a dismissed idea from coming back. Requests are saved one by one,
+and a page counts as read once all its sections were answered: a rate limit
+halfway through a first full read keeps what was done, and the next run goes on
+from there instead of spending the day's quota again. Each reference is looked up in
+Open Library (only author and title are sent): found (linked), not found, or
+unchecked when offline.
+
+Placing appends a section to the essay — `## title`, your words, *From Day N,
+date.*, and *See also:* the references Open Library found — through the file
+sync (the previous file is kept); the essay's existing text is never touched.
+Undo removes the section while the essay still ends with it. A new essay is a
+new note and file. Notes of kind *reference* never receive ideas.
+
+Without any model, `essay_passages` ranks the journal passages closest to each
+essay (its title and first lines) with the search index's local embeddings.
+
 ## Undo (`services/undo.py`)
 
 Every assistant action records what reverses it: the id it created, the statuses
@@ -301,6 +350,10 @@ Watching → *Sorting what you watch* lists what waits (confirm the guess, choos
 another category, or sort the whole channel — a rule `^channel$`) and what the
 model sorted, to correct.
 
+**The history** (Takeout, Chrome) is sorted the same way on demand — *Sort the
+history too*: every past video nothing places, 25 titles per question, then the
+estimated blocks are rebuilt (`reclassify.reapply_rules`) with the answers.
+
 ## YouTube history files (`services/youtube.py`)
 
 One import box takes YouTube's history (Takeout or My Activity, JSON or HTML,
@@ -338,17 +391,25 @@ START → retrieve → agent ⇄ tools → END
 - **retrieve** — if the message looks like a question about the past, the hybrid
   search runs *locally* and the best passages go into the system prompt. Most
   memory questions are then answered in one model request instead of two.
-- **agent** — the chat model with 21 tools bound:
+- **agent** — the chat model with 31 tools bound:
   - read: `search_memory`, `get_time_summary`, `get_day`, `list_goals`,
     `get_life_numbers`, `get_youtube`, `get_prayer_times`, `get_spending`,
-    `get_habit_progress`, `list_life_events`;
+    `list_transactions`, `get_habit_progress`, `list_life_events`, `get_person`,
+    `list_library`, `read_note`, `list_ideas`;
   - write (each undoable): `log_time`, `start_timer`, `stop_timer` (or pause),
-    `resume_timer`, `log_expense`, `log_habit`, `add_to_journal`, `update_goal`,
-    `create_goal`, `add_life_event`, `plan_block`.
+    `resume_timer`, `log_expense` (with the `person` who gave or received it),
+    `update_transaction`, `delete_transaction`, `add_person_moment`, `log_habit`,
+    `add_to_journal`, `update_goal`, `create_goal`, `add_life_event`, `plan_block`,
+    `update_library`, `add_rule` (and the activity is re-filed).
 
   For a cloud model, tools leave out what is private: private journal pages,
-  entries and life events, and the titles and channels of videos in a
-  *destructive* category (only their minutes are given).
+  entries, notes, people, moments and life events, and the titles and channels
+  of videos in a *destructive* category (only their minutes are given).
+
+  The 31 definitions take about 3,800 tokens. A local model (Ollama's window is
+  4,096 tokens by default) gets 12 of them (`tools.LOCAL_TOOLS`: memory, the day,
+  logging, timers, money, habits, the journal, the plan) —
+  `llm.compose_each` binds each model its own list.
 - **tools** — LangGraph's `ToolNode` runs the calls, then loops back (max 4 rounds).
 
 The system prompt is built from live data: today's numbers, your categories
@@ -365,8 +426,10 @@ took 46 s with the model cold and 16 s once loaded.
 
 ## Capture: free text → reviewed records
 
-`ai/capture.py`: the model fills a Pydantic schema (time entries, money, habits,
-media, people) via function calling (cloud) or JSON-schema decoding (Ollama).
+`ai/capture.py`: the model fills a Pydantic schema (time entries, money — with the
+`person` who gave or received it —, habits, media, people, and *moments*: a gift
+someone gave or received, something someone did or said) via function calling
+(cloud) or JSON-schema decoding (Ollama).
 `normalize()` maps names to ids and flags doubts; the draft is stored; **nothing is
 written until you press Save**. Measured on a real day with the local 4B model
 (247 s): it misfiled study hours as work, invented two small expenses and
@@ -416,7 +479,7 @@ the venv's `pythonw.exe` (signed by the Python Software Foundation).
 
 ## Tests
 
-- Backend: `python -m pytest tests -q` — 130 tests; each uses a fresh temporary
+- Backend: `python -m pytest tests -q` — 151 tests; each uses a fresh temporary
   database, a throwaway account and its own folder of Markdown files shaped like
   the real journal (CRLF, trailing spaces, no final newline); AI off unless a
   scripted fake model is injected, ActivityWatch mocked, notifications sent to a
