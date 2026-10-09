@@ -68,10 +68,39 @@ async function flush() {
   }
 }
 
+// May this video play? Asked by the YouTube tabs (blocking noise). Answers are
+// kept 30 seconds; no answer (OwnLife not running, no key) blocks nothing.
+const checks = new Map();
+
+async function checkVideo(video) {
+  const cached = checks.get(video.video_id);
+  if (cached && Date.now() - cached.at < 30000) return cached.answer;
+  const { server, token } = await config();
+  if (!token) return null;
+  try {
+    const r = await fetch(`${server}/api/ingest/youtube/check`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, "X-OwnLife": "1" },
+      body: JSON.stringify({ video_id: video.video_id, title: video.title, channel: video.channel, url: video.url }),
+    });
+    if (!r.ok) return null;
+    const answer = await r.json();
+    checks.set(video.video_id, { at: Date.now(), answer });
+    if (checks.size > 200) checks.delete(checks.keys().next().value);
+    return answer;
+  } catch {
+    return null;
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg && msg.type === "heartbeat" && msg.hb) {
     enqueue(msg.hb).then(flush);
     return false;
+  }
+  if (msg && msg.type === "check" && msg.video && msg.video.video_id) {
+    checkVideo(msg.video).then(reply);
+    return true; // the reply comes later
   }
   if (msg && msg.type === "flush") {
     flush().then(() => reply({ ok: true }));

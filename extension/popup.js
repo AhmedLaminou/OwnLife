@@ -47,6 +47,12 @@ async function render() {
     bar.className = over ? "over" : near ? "near" : "";
     document.getElementById("noise-cats").replaceChildren(...noise.categories.slice(0, 4).map((c) => row(c.name, hm(c.seconds))));
   }
+  const b = s.today && s.today.blocking;
+  document.getElementById("blocking").textContent = !b || !b.enabled
+    ? ""
+    : b.active
+      ? `Noise videos blocked until midnight (limit ${hm(b.limit_seconds)}).`
+      : `Noise videos blocked from ${hm(b.limit_seconds)} — ${hm(Math.max(0, b.limit_seconds - b.noise_seconds))} left.`;
   const list = document.getElementById("channels");
   list.replaceChildren(...((s.today && s.today.channels) || []).map((c) => row(c.channel, hm(c.seconds))));
   document.getElementById("open").onclick = () =>

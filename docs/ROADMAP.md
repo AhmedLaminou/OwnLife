@@ -86,6 +86,12 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
   locally. Reading by itself is off until switched on.
 - **The YouTube history sorted by the local model** on demand.
 
+**v0.2.6 (2026-10-09)** — noise, blocked:
+
+- **The extension (0.3.0) blocks noise videos** once the day's noise reaches a
+  limit (2 hours), until midnight; categories and channels can be blocked every
+  day; learning and unsorted videos always play.
+
 ## Next, in the order that matters most
 
 1. **Go live** — apply the seed, run `scripts\autostart.ps1`, set
@@ -99,9 +105,8 @@ tools and RAG, capture with review, daily review, backups, export, CLI, doctor.
 3. **Google Takeout, the rest**: YouTube subscriptions (pre-sort the channels you
    chose), Classroom (the university classes as courses, a chapter on the Life
    page), Calendar.
-4. **A screen over noise once the budget is spent** — optional: the extension
-   covers a noise video with "your hour is spent", one button for ten more
-   minutes; learning videos never blocked.
+4. **Blocking noise beyond YouTube** — news sites and social networks in the
+   browser, once the extension reports the active tab's site.
 5. **A Google activity timeline** — the rest of a Takeout as dated lines per day:
    Gemini prompts, Chrome pages, searches. Searchable by the assistant
    (`search_activity`), shown under each day, private by default for cloud models.

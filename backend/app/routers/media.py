@@ -16,7 +16,7 @@ from app.deps import DB, CurrentProfile, CurrentUser
 from app.ai.llm import effective_mode
 from app.models import Category, ClassificationRule, MediaItem, WatchEvent
 from app.serializers import category_out, iso, media_out
-from app.services import videosort, watchlive
+from app.services import blocking, videosort, watchlive
 from app.services.rules import Activity, load_ruleset
 from app.services.timeutil import local_today, range_utc, tz_of
 from app.services.youtube import (
@@ -260,6 +260,14 @@ class SortPrefsIn(BaseModel):
     sort: bool | None = None
 
 
+class BlockingIn(BaseModel):
+    enabled: bool = False
+    limit_minutes: int = Field(120, ge=0, le=24 * 60)
+    always: list[int] = Field(default_factory=list, max_length=100)
+    never: list[int] = Field(default_factory=list, max_length=100)
+    channels: list[str] = Field(default_factory=list, max_length=500)
+
+
 class SortRunIn(BaseModel):
     history: bool = False  # the past videos (Takeout, Chrome) instead of the recent ones
 
@@ -273,6 +281,51 @@ def _video_row(v: videosort.Video, cat: Category | None = None) -> dict:
     return {"video_id": v.video_id, "title": v.title, "channel": v.channel, "seconds": round(v.seconds),
             "last": iso(v.last), "url": f"https://www.youtube.com/watch?v={v.video_id}",
             "category": category_out(cat) if cat else None}
+
+
+# ---------------------------------------------------------------- blocking noise
+def _noise_channels(db, user_id: int, ids: set[int]) -> list[str]:
+    """Channels watched in the last 30 days that your rules file as noise, the
+    most watched first — the candidates for blocking."""
+    rules = load_ruleset(db, user_id)
+    seconds: dict[str, float] = {}
+    for ev in db.scalars(select(WatchEvent).where(
+            WatchEvent.user_id == user_id, WatchEvent.channel.is_not(None),
+            WatchEvent.occurred_at >= utcnow() - timedelta(days=30))):
+        if rules.classify(Activity(title=ev.title, channel=ev.channel, url=ev.url)) in ids:
+            seconds[ev.channel] = seconds.get(ev.channel, 0.0) + (ev.seconds or 300.0)
+    return [c for c, _ in sorted(seconds.items(), key=lambda kv: -kv[1])][:40]
+
+
+def _blocking_out(db, user_id: int, profile) -> dict:
+    cats = blocking.noise_categories(db, user_id)
+    return {"prefs": blocking.prefs_of(profile), "categories": [{"id": c.id, "name": c.name} for c in cats],
+            "status": blocking.status(db, user_id, profile, utcnow()),
+            "suggestions": _noise_channels(db, user_id, {c.id for c in cats})}
+
+
+@router.get("/youtube/blocking")
+def get_blocking(user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    return _blocking_out(db, user.id, profile)
+
+
+@router.put("/youtube/blocking")
+def put_blocking(body: BlockingIn, user: CurrentUser, profile: CurrentProfile, db: DB) -> dict:
+    ids = {c.id for c in blocking.noise_categories(db, user.id)}
+    data = body.model_dump()
+    data["always"] = sorted({i for i in data["always"] if i in ids})
+    data["never"] = sorted({i for i in data["never"] if i in ids and i not in data["always"]})
+    seen: set[str] = set()
+    channels = []
+    for c in data["channels"]:
+        name = " ".join(c.split())[:200]
+        if name and blocking.channel_key(name) not in seen:
+            seen.add(blocking.channel_key(name))
+            channels.append(name)
+    data["channels"] = channels
+    profile.prefs = {**(profile.prefs or {}), "youtube_block": data}
+    db.commit()
+    return _blocking_out(db, user.id, profile)
 
 
 @router.get("/youtube/sorting")

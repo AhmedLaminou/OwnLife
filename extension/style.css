@@ -133,6 +133,11 @@ body {
   background: var(--critical);
 }
 
+.note {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 .row {
   display: flex;
   justify-content: space-between;

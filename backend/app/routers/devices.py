@@ -20,8 +20,9 @@ from app.deps import DB, CurrentProfile, CurrentUser
 from app.models import ApiToken, Profile, User, WatchEvent
 from app.security import hash_token
 from app.serializers import iso
-from app.services import reminders, videosort, watchlive
+from app.services import blocking, reminders, videosort, watchlive
 from app.services.reminders import noise_today
+from app.services.youtube import channel_for_video
 from app.services.rules import load_ruleset
 from app.services.timeutil import local_today, range_utc, tz_of
 
@@ -38,6 +39,13 @@ class TokenIn(BaseModel):
 class Heartbeat(BaseModel):
     video_id: str = Field(max_length=32)
     ts: str = Field(max_length=40)
+    title: str | None = Field(None, max_length=300)
+    channel: str | None = Field(None, max_length=200)
+    url: str | None = Field(None, max_length=500)
+
+
+class CheckIn(BaseModel):
+    video_id: str = Field(max_length=32)
     title: str | None = Field(None, max_length=300)
     channel: str | None = Field(None, max_length=200)
     url: str | None = Field(None, max_length=500)
@@ -110,8 +118,10 @@ def _today(db, user_id: int) -> dict:
     tz = tz_of(profile.timezone)
     lo, hi = range_utc(local_today(tz), local_today(tz), tz)
     warn = int(reminders.settings_with_defaults((profile.prefs or {}).get("reminders"))["noise_warn_minutes"] or 0)
+    now = utcnow()
     return {**watchlive.today_summary(db, user_id, lo, hi),
-            "noise": {**noise_today(db, user_id, profile, utcnow()), "warn_seconds": warn * 60}}
+            "noise": {**noise_today(db, user_id, profile, now), "warn_seconds": warn * 60},
+            "blocking": blocking.status(db, user_id, profile, now)}
 
 
 @router.get("/ingest/ping")
@@ -132,6 +142,23 @@ async def ingest_youtube(body: IngestIn, user: YoutubeUser) -> dict:
                 db.commit()
             videosort.schedule(settings, uid)  # videos no rule places: the local model sorts them
             return {**result, "today": _today(db, uid)}
+
+    return await run_in_threadpool(work)
+
+
+@router.post("/ingest/youtube/check")
+async def check_video(body: CheckIn, user: YoutubeUser) -> dict:
+    """Asked by the extension before a video plays and every minute while it
+    plays: may it play? (Blocking noise — Watching → Blocking noise.)"""
+    uid = user.id
+    video = body.model_dump()
+
+    def work() -> dict:
+        with SessionLocal() as db:
+            profile = db.get(Profile, uid)
+            if not video.get("channel") and watchlive.VIDEO_ID.match(video["video_id"]):
+                video["channel"] = channel_for_video(db, uid, video["video_id"], enabled=False)  # known ones only: fast
+            return blocking.decide(db, uid, profile, load_ruleset(db, uid), video, utcnow())
 
     return await run_in_threadpool(work)
 

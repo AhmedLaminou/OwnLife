@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Check, Clapperboard, FileUp, MonitorPlay, Plus, Sparkles } from "lucide-react";
+import clsx from "clsx";
+import { Ban, BookOpen, Check, Clapperboard, FileUp, MonitorPlay, Plus, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Columns, HBars } from "../components/charts";
 import { CategorySelect, useInvalidateLedger } from "../components/domain";
@@ -8,7 +9,7 @@ import { api, qs } from "../lib/api";
 import { addDays, clock, compactNum, hm, num, pluralize, shortDate } from "../lib/format";
 import { useTimeZone, useToday } from "../lib/hooks";
 import { KIND_LABEL, chartKinds, kindColor } from "../lib/kinds";
-import type { HistoryImport, Kind, MeasuredToday as MeasuredTodayData, MediaItem, SortedVideo, YoutubeSorting, YoutubeStats, YoutubeSummary } from "../lib/types";
+import type { BlockingPrefs, BlockingState, HistoryImport, Kind, MeasuredToday as MeasuredTodayData, MediaItem, SortedVideo, YoutubeSorting, YoutubeStats, YoutubeSummary } from "../lib/types";
 
 const RANGES = [
   { id: "30", label: "30 days" },
@@ -49,6 +50,88 @@ function MeasuredToday() {
             </li>
           ))}
         </ul>
+      </div>
+    </Card>
+  );
+}
+
+const LIMITS = [30, 60, 90, 120, 150, 180, 240];
+
+/** Noise videos blocked by the extension once today's noise reaches the limit (until midnight). */
+function BlockingCard() {
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["youtube-blocking"], queryFn: () => api.get<BlockingState>("/api/media/youtube/blocking"), refetchInterval: 60_000 });
+  const [channel, setChannel] = useState("");
+  const save = useMutation({
+    mutationFn: (prefs: BlockingPrefs) => api.put<BlockingState>("/api/media/youtube/blocking", prefs),
+    onSuccess: (r) => qc.setQueryData(["youtube-blocking"], r),
+  });
+  if (!data) return null;
+  const p = data.prefs;
+  const st = data.status;
+  const set = (patch: Partial<BlockingPrefs>) => save.mutate({ ...p, ...patch });
+  const mode = (id: number) => (p.always.includes(id) ? "always" : p.never.includes(id) ? "never" : "limit");
+  const setMode = (id: number, m: string) =>
+    set({ always: [...p.always.filter((x) => x !== id), ...(m === "always" ? [id] : [])], never: [...p.never.filter((x) => x !== id), ...(m === "never" ? [id] : [])] });
+  const addChannel = (name: string) => {
+    const n = name.trim();
+    if (n && !p.channels.some((c) => c.toLowerCase() === n.toLowerCase())) set({ channels: [...p.channels, n] });
+    setChannel("");
+  };
+  return (
+    <Card
+      title="Blocking noise"
+      subtitle="The extension blocks the videos of your noise categories once today's noise reaches your limit — until midnight. Learning videos, and videos not sorted yet, always play."
+      action={<Ban size={18} className={p.enabled ? "text-critical" : "text-ink-3"} />}
+    >
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <Toggle checked={p.enabled} onChange={(v) => set({ enabled: v })} label="Block noise videos once today's noise reaches" />
+          <Select value={p.limit_minutes} onChange={(e) => set({ limit_minutes: Number(e.target.value) })} className="!w-auto" aria-label="Daily noise limit">
+            {[...new Set([...LIMITS, p.limit_minutes])].sort((a, b) => a - b).map((m) => <option key={m} value={m}>{hm(m * 60)}</option>)}
+          </Select>
+        </div>
+        {p.enabled && (
+          <p className={clsx("text-[13px]", st.active ? "font-medium text-critical" : "text-ink-2")}>
+            {st.active
+              ? `Blocking now: ${hm(st.noise_seconds)} of noise today. Noise videos play again at midnight.`
+              : `Noise today: ${hm(st.noise_seconds)} of ${hm(st.limit_seconds)} — ${hm(Math.max(0, st.limit_seconds - st.noise_seconds))} left before the block.`}
+          </p>
+        )}
+        <div className="grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          {data.categories.map((c) => (
+            <label key={c.id} className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="text-ink">{c.name}</span>
+              <Select value={mode(c.id)} onChange={(e) => setMode(c.id, e.target.value)} className="!w-auto !h-8 text-[13px]" aria-label={`${c.name}: when blocked`}>
+                <option value="limit">blocked after the limit</option>
+                <option value="always">always blocked</option>
+                <option value="never">never blocked</option>
+              </Select>
+            </label>
+          ))}
+        </div>
+        <div>
+          <p className="mb-1.5 text-[13px] font-medium text-ink">Channels blocked every day</p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {p.channels.map((c) => (
+              <span key={c} className="inline-flex items-center gap-1 rounded-lg border border-line px-2 py-1 text-[12px] text-ink">
+                {c}
+                <button onClick={() => set({ channels: p.channels.filter((x) => x !== c) })} className="text-ink-3 hover:text-critical" aria-label={`Unblock ${c}`}>
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            <form className="flex gap-1.5" onSubmit={(e) => { e.preventDefault(); addChannel(channel); }}>
+              <Input list="noise-channels" value={channel} onChange={(e) => setChannel(e.target.value)} placeholder="A channel's name" className="!h-8 !w-56 text-[13px]" aria-label="Channel to block" />
+              <datalist id="noise-channels">{data.suggestions.filter((c) => !p.channels.includes(c)).map((c) => <option key={c} value={c} />)}</datalist>
+              <Button size="sm" variant="secondary" type="submit" disabled={!channel.trim()}>Block</Button>
+            </form>
+          </div>
+        </div>
+        <p className="text-[12px] text-ink-3">
+          Needs the extension 0.3.0: chrome://extensions → OwnLife → reload. When OwnLife is not running, nothing is blocked. The day runs from midnight to midnight.
+        </p>
+        <ErrorNote error={save.error} />
       </div>
     </Card>
   );
@@ -244,6 +327,7 @@ function YouTubeTab() {
   return (
     <div className="space-y-5">
       <MeasuredToday />
+      <BlockingCard />
       <SortingCard />
       <Card
         title="YouTube history"

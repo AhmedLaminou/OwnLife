@@ -569,6 +569,26 @@ export interface EssayPassages {
   error: string | null;
 }
 
+/** Blocking noise videos (Watching → YouTube). */
+export interface BlockingPrefs {
+  enabled: boolean;
+  limit_minutes: number;
+  /** Noise categories blocked all day, every day. */
+  always: number[];
+  /** Noise categories never blocked. */
+  never: number[];
+  /** Channels blocked all day, every day. */
+  channels: string[];
+}
+
+export interface BlockingState {
+  prefs: BlockingPrefs;
+  categories: { id: number; name: string }[];
+  status: { enabled: boolean; noise_seconds: number; limit_seconds: number; active: boolean; until: string };
+  /** Noise channels watched in the last 30 days, the most watched first. */
+  suggestions: string[];
+}
+
 /** A video the extension measured, for sorting (Watching → YouTube). */
 export interface SortedVideo {
   video_id: string;

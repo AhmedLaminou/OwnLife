@@ -329,6 +329,28 @@ The icon's badge shows today's noise (grey, amber in the last 15 minutes of the
 budget, red past it); the service worker asks `/api/ingest/ping` once a minute
 when nothing was uploaded, since noise grows outside YouTube too.
 
+## Blocking noise (`services/blocking.py`, `extension/content.js`)
+
+Before a video plays, and every minute while it is open, the extension asks
+`/api/ingest/youtube/check` (with its device key): may it play? The answer uses
+the same classification as the ledger (rules, your sortings, the local model's)
+and today's noise from every source, as the noise alert counts it:
+
+- a channel you block → blocked, every day;
+- a noise category set to *always blocked* → blocked, every day;
+- a noise category (not set to *never*) once today's noise reaches the limit (2
+  hours by default) → blocked until your local midnight;
+- anything else plays — learning, and videos nothing has sorted yet (the local
+  model sorts them within a minute or two, and the next check blocks them if
+  they are noise).
+
+A blocked video is paused and muted behind a full-page screen in a shadow DOM
+(fullscreen is left first); a `play` listener keeps it paused. YouTube changes
+videos without reloading the page: the script follows `yt-navigate-finish` and
+the address. Answers are kept 30 seconds by the service worker. When OwnLife
+does not answer, nothing is blocked. A private category is never named on the
+screen. Settings: Watching → *Blocking noise* (`profile.prefs.youtube_block`).
+
 ## Sorting videos (`services/videosort.py`)
 
 Order of precedence for a single video: a category **you** chose for it, then
@@ -479,7 +501,7 @@ the venv's `pythonw.exe` (signed by the Python Software Foundation).
 
 ## Tests
 
-- Backend: `python -m pytest tests -q` — 151 tests; each uses a fresh temporary
+- Backend: `python -m pytest tests -q` — 155 tests; each uses a fresh temporary
   database, a throwaway account and its own folder of Markdown files shaped like
   the real journal (CRLF, trailing spaces, no final newline); AI off unless a
   scripted fake model is injected, ActivityWatch mocked, notifications sent to a
